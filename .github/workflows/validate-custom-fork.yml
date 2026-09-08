@@ -1,0 +1,41 @@
+name: Validate custom fork
+
+on:
+  push:
+    branches:
+      - feature/cloud-sync-schedule-presets-notifications
+    paths:
+      - 'app/**'
+      - 'gradle/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - '.github/workflows/validate-custom-fork.yml'
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'gradle/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Prepare Gradle wrapper
+        run: |
+          chmod +x gradlew
+          sed -i '/^org\.gradle\.java\.home=/d' gradle.properties
+      - name: Compile Kotlin
+        run: ./gradlew :app:compileDebugKotlin
+      - name: Run unit tests
+        run: ./gradlew :app:testDebugUnitTest
