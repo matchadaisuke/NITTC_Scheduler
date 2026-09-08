@@ -6,6 +6,7 @@ on:
       - feature/cloud-sync-schedule-presets-notifications
     paths:
       - scripts/apply_customization.py
+      - .github/workflows/apply-customization.yml
 
 permissions:
   contents: write
