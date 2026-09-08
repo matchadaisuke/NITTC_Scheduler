@@ -189,6 +189,168 @@ internal fun CloudFileSyncSettingsContent() {
 '''
 ui.write_text(text[:pos] + mega_ui, encoding="utf-8")
 
+# Full-screen MEGA sync surface used by the main sync action.
+mega_screen = ROOT / "app/src/main/java/jp/linkserver/nittcsc/ui/MegaSyncScreen.kt"
+mega_screen.write_text(
+    r'''package jp.linkserver.nittcsc.ui
+
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun MegaSyncScreen(onBack: () -> Unit) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("MEGA同期") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "戻る"
+                        )
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp)
+        ) {
+            CloudFileSyncSettingsContent()
+        }
+    }
+}
+''',
+    encoding="utf-8"
+)
+
+# Keep the original upstream device-to-device sync UI in Settings while MEGA becomes primary.
+settings = ROOT / "app/src/main/java/jp/linkserver/nittcsc/ui/SettingsScreen.kt"
+replace_once(
+    settings,
+    '''        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            AppSettingsCategory(title = "クラウド同期")
+            CloudFileSyncSettingsContent()
+        }
+''',
+    '''        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            AppSettingsCategory(title = "同期")
+            CloudFileSyncSettingsContent()
+            AppSettingsGroup {
+                item("legacy_local_sync") {
+                    AppSettingsNavigationItem(
+                        title = "旧・端末間同期",
+                        summary = "本家のWi-Fi / Nearby / 信頼済み端末による同期を利用します。",
+                        onClick = onOpenLocalSync
+                    )
+                }
+            }
+        }
+'''
+)
+
+# Swap only the main sync route to MEGA. The original SyncScreen is preserved as a legacy route.
+app = ROOT / "app/src/main/java/jp/linkserver/nittcsc/ui/NittcSchedulerApp.kt"
+replace_once(
+    app,
+    '''    var showSync by rememberSaveable { mutableStateOf(false) }
+    var showSyncDiscovery by rememberSaveable { mutableStateOf(false) }
+''',
+    '''    var showSync by rememberSaveable { mutableStateOf(false) }
+    var showLegacySync by rememberSaveable { mutableStateOf(false) }
+    var showSyncDiscovery by rememberSaveable { mutableStateOf(false) }
+'''
+)
+replace_once(
+    app,
+    '''    BackHandler(enabled = showSyncDiscovery) { showSyncDiscovery = false }
+    BackHandler(enabled = showSync && !showSyncDiscovery && !showNearbySync) {
+        showSync = false
+    }
+''',
+    '''    BackHandler(enabled = showSyncDiscovery) { showSyncDiscovery = false }
+    BackHandler(enabled = showLegacySync && !showSyncDiscovery && !showNearbySync) {
+        showLegacySync = false
+    }
+    BackHandler(enabled = showSync) {
+        showSync = false
+    }
+'''
+)
+replace_once(
+    app,
+    '''        showNearbySync -> "nearbySync"
+        showSyncDiscovery -> "syncDiscovery"
+        showSync -> "sync"
+''',
+    '''        showNearbySync -> "nearbySync"
+        showSyncDiscovery -> "syncDiscovery"
+        showLegacySync -> "legacySync"
+        showSync -> "sync"
+'''
+)
+replace_once(
+    app,
+    '''                    onAbout = {
+                        showSettings = true
+                        showAbout = true
+                    },
+                    onToggleLocalAi = viewModel::toggleLocalAi,
+''',
+    '''                    onAbout = {
+                        showSettings = true
+                        showAbout = true
+                    },
+                    onOpenLocalSync = { showLegacySync = true },
+                    onToggleLocalAi = viewModel::toggleLocalAi,
+'''
+)
+replace_once(
+    app,
+    '''            "sync" -> {
+                SyncScreen(
+''',
+    '''            "sync" -> {
+                MegaSyncScreen(onBack = { showSync = false })
+            }
+            "legacySync" -> {
+                SyncScreen(
+'''
+)
+replace_once(
+    app,
+    '''                    onBack = {
+                        showSync = false
+                    },
+                    onSaveProfile = { nickname, name, pw, autoSync, conflictAuto ->
+''',
+    '''                    onBack = {
+                        showLegacySync = false
+                    },
+                    onSaveProfile = { nickname, name, pw, autoSync, conflictAuto ->
+'''
+)
+
 # Developer setup note.
 readme = ROOT / "README.md"
 readme_text = readme.read_text(encoding="utf-8")
@@ -200,6 +362,9 @@ This fork can synchronize its full scheduler JSON directly with a MEGA account. 
 need to sign in with their MEGA email/password (and MFA code when enabled); no Android file picker
 or separate MEGA app is required. The password is not persisted. After login the MEGA session is
 stored and reused.
+
+The main sync button opens MEGA sync. The original local Wi-Fi / Nearby / trusted-device sync UI is
+kept under Settings as "旧・端末間同期" rather than being removed.
 
 Developer setup:
 
