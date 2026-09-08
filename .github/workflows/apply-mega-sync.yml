@@ -43,5 +43,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app README.md
           git commit -m "feat: switch cloud sync UI to standalone MEGA login"
+          # chmod/sed above are CI-only and must not block rebase.
+          git restore gradlew gradle.properties
           git pull --rebase origin feature/cloud-sync-schedule-presets-notifications
           git push origin HEAD:feature/cloud-sync-schedule-presets-notifications
