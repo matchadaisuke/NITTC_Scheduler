@@ -1646,8 +1646,8 @@ fun SettingsScreen(
             AppSettingsGroup {
                 item("legacy_local_sync") {
                     AppSettingsNavigationItem(
-                        title = "旧・端末間同期",
-                        summary = "本家のWi-Fi / Nearby / 信頼済み端末による同期を利用します。",
+                        title = stringResource(R.string.settings_legacy_local_sync_title),
+                        summary = stringResource(R.string.settings_legacy_local_sync_summary),
                         onClick = onOpenLocalSync
                     )
                 }

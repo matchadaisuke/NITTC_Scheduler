@@ -2720,7 +2720,7 @@ private fun NittcSchedulerContent(viewModel: SchedulerViewModel, startOnTimetabl
                                                 AppIconButton(onClick = { showSync = true }) {
                                                     Icon(
                                                         painter = painterResource(R.drawable.sync_desktop),
-                                                        contentDescription = stringResource(R.string.cd_open_local_sync)
+                                                        contentDescription = stringResource(R.string.cd_open_mega_sync)
                                                     )
                                                 }
                                                 AppIconButton(onClick = { showSettings = true }) {
