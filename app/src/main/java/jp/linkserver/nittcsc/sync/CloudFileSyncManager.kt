@@ -469,7 +469,7 @@ private class MegaRuntime(
         val file = File(dir, fileName)
         file.writeText(text)
         try {
-            transfer("startUpload", file.absolutePath, parent, fileName).requireOk("アップロード")
+            transfer("startUpload", file.absolutePath, parent, fileName, -1L, null, false, false, null).requireOk("アップロード")
         } finally {
             runCatching { file.delete() }
         }
@@ -480,7 +480,7 @@ private class MegaRuntime(
         val nodeName = (invokeOn(node, "getName") as? String).orEmpty().ifBlank { "scheduler-sync.json" }
         val destination = File(dir, nodeName)
         return try {
-            transfer("startDownload", node, destination.absolutePath).requireOk("ダウンロード")
+            transfer("startDownload", node, destination.absolutePath, null, null, false, null, 5, 1).requireOk("ダウンロード")
             destination.readText()
         } finally {
             runCatching { dir.deleteRecursively() }
