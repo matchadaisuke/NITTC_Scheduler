@@ -58,7 +58,7 @@ internal fun MainActionsOverflowMenu(
                 )
             }
             DropdownMenuItem(
-                text = { Text(stringResource(R.string.sync_title_local_sync)) },
+                text = { Text("MEGA同期") },
                 onClick = {
                     expanded = false
                     onOpenSync()
