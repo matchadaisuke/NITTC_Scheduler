@@ -24,7 +24,39 @@ jobs:
           distribution: temurin
           java-version: '17'
       - name: Apply source transformation
-        run: python3 scripts/apply_customization.py
+        run: |
+          python3 scripts/apply_customization.py
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def edit(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'compatibility fix pattern missing: {path}: {old}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          edit(
+              'app/src/main/java/jp/linkserver/nittcsc/reminder/AdditionalLessonNotificationWorker.kt',
+              '        suspend fun findNextLesson(\n',
+              '        internal suspend fun findNextLesson(\n'
+          )
+          edit(
+              'app/src/main/java/jp/linkserver/nittcsc/sync/CloudFileSyncManager.kt',
+              'object : InvalidationTracker.Observer(*watchedTables) {',
+              'object : InvalidationTracker.Observer(watchedTables) {'
+          )
+          edit(
+              'app/src/main/java/jp/linkserver/nittcsc/data/SchedulerRepository.kt',
+              'useKosenMode = preset.periodLabelStyle != PeriodLabelStyle.SINGLE_KOSHI,',
+              'useKosenMode = preset.periodLabelStyle == PeriodLabelStyle.PAIR_KOSHI,'
+          )
+          edit(
+              'app/src/main/java/jp/linkserver/nittcsc/viewmodel/SchedulerViewModel.kt',
+              '            5 -> "金"\n            else -> ""',
+              '            5 -> "金"\n            6 -> "土"\n            else -> ""'
+          )
+          PY
       - name: Prepare Gradle wrapper
         run: |
           chmod +x gradlew
