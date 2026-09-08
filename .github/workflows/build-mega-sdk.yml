@@ -152,5 +152,6 @@ jobs:
             exit 0
           fi
           git commit -m "build: vendor MEGA SDK v10.19.0 Android AAR"
+          git restore gradlew gradle.properties
           git pull --rebase origin feature/cloud-sync-schedule-presets-notifications
           git push origin HEAD:feature/cloud-sync-schedule-presets-notifications
