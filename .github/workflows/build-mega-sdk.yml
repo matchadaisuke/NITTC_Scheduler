@@ -1,0 +1,161 @@
+name: Build vendored MEGA SDK
+
+on:
+  push:
+    branches:
+      - feature/cloud-sync-schedule-presets-notifications
+    paths:
+      - .github/workflows/build-mega-sdk.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build-mega-sdk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/cloud-sync-schedule-presets-notifications
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install native build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y swig ninja-build pkg-config
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;27.1.12297006"
+
+      - name: Checkout official MEGA SDK and vcpkg
+        run: |
+          git clone --depth 1 --branch v10.19.0 https://github.com/meganz/sdk.git .mega-sdk-src
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git .mega-vcpkg
+          ./.mega-vcpkg/bootstrap-vcpkg.sh -disableMetrics
+
+      - name: Build MEGA JNI and Java bindings
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.1.12297006
+        run: |
+          set -euxo pipefail
+          for ABI in arm64-v8a x86_64; do
+            cmake -S .mega-sdk-src --preset mega-android \
+              -B ".mega-build-${ABI}" \
+              -DVCPKG_ROOT="$PWD/.mega-vcpkg" \
+              -DANDROID_ABI="${ABI}" \
+              -DANDROID_PLATFORM=28 \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DENABLE_CHAT=OFF \
+              -DENABLE_SYNC=OFF \
+              -DENABLE_ISOLATED_GFX=OFF \
+              -DENABLE_MEDIA_FILE_METADATA=OFF \
+              -DENABLE_SDKLIB_EXAMPLES=OFF \
+              -DENABLE_SDKLIB_TESTS=OFF \
+              -DUSE_LIBUV=OFF \
+              -DUSE_PDFIUM=OFF \
+              -DUSE_FREEIMAGE=OFF \
+              -DUSE_FFMPEG=OFF \
+              -DENABLE_JAVA_BINDINGS=ON \
+              -DENABLE_SDKLIB_ANDROID_DYNAMIC_LIBRARY=ON
+            cmake --build ".mega-build-${ABI}" --target SDKJavaBindings -j2
+            test -f ".mega-build-${ABI}/bindings/java/libmega.so"
+          done
+
+      - name: Package Android AAR
+        run: |
+          set -euxo pipefail
+          mkdir -p .mega-aar/sdk/src/main/java/nz/mega/sdk
+          mkdir -p .mega-aar/sdk/src/main/jniLibs/arm64-v8a
+          mkdir -p .mega-aar/sdk/src/main/jniLibs/x86_64
+
+          cp .mega-sdk-src/bindings/java/nz/mega/sdk/*.java .mega-aar/sdk/src/main/java/nz/mega/sdk/
+          cp .mega-sdk-src/bindings/java/nz/mega/sdk/*.kt .mega-aar/sdk/src/main/java/nz/mega/sdk/
+          cp .mega-build-arm64-v8a/bindings/java/nz/mega/sdk/*.java .mega-aar/sdk/src/main/java/nz/mega/sdk/
+          rm -f .mega-aar/sdk/src/main/java/nz/mega/sdk/MegaApiSwing.java
+
+          cp .mega-build-arm64-v8a/bindings/java/libmega.so .mega-aar/sdk/src/main/jniLibs/arm64-v8a/libmega.so
+          cp .mega-build-x86_64/bindings/java/libmega.so .mega-aar/sdk/src/main/jniLibs/x86_64/libmega.so
+
+          cat > .mega-aar/settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "nittc-mega-sdk"
+          include(":sdk")
+          EOF
+
+          cat > .mega-aar/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.library") version "9.1.1" apply false
+              id("org.jetbrains.kotlin.android") version "2.3.10" apply false
+          }
+          EOF
+
+          cat > .mega-aar/sdk/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.library")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "nz.mega.sdk"
+              compileSdk = 36
+              defaultConfig { minSdk = 28 }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+          }
+
+          kotlin {
+              compilerOptions {
+                  jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+              }
+          }
+
+          dependencies {
+              implementation("androidx.exifinterface:exifinterface:1.3.7")
+              implementation("org.jetbrains:annotations:24.1.0")
+          }
+          EOF
+
+          cat > .mega-aar/sdk/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" />
+          EOF
+
+          chmod +x gradlew
+          sed -i '/^org\.gradle\.java\.home=/d' gradle.properties
+          ./gradlew -p .mega-aar :sdk:assembleRelease
+
+          mkdir -p app/libs third_party
+          cp .mega-aar/sdk/build/outputs/aar/sdk-release.aar app/libs/mega-sdk.aar
+          cp .mega-sdk-src/LICENSE third_party/mega-sdk-LICENSE.txt
+          unzip -l app/libs/mega-sdk.aar | grep -E 'classes.jar|jni/arm64-v8a/libmega.so|jni/x86_64/libmega.so'
+
+      - name: Commit vendored SDK
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f app/libs/mega-sdk.aar third_party/mega-sdk-LICENSE.txt
+          if git diff --cached --quiet; then
+            echo "Vendored SDK already up to date"
+            exit 0
+          fi
+          git commit -m "build: vendor MEGA SDK v10.19.0 Android AAR"
+          git push origin HEAD:feature/cloud-sync-schedule-presets-notifications
