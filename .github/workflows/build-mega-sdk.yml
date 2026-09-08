@@ -38,10 +38,9 @@ jobs:
           ./.mega-vcpkg/bootstrap-vcpkg.sh -disableMetrics
 
       - name: Build MEGA JNI and Java bindings
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.1.12297006
         run: |
           set -euxo pipefail
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.1.12297006"
           for ABI in arm64-v8a x86_64; do
             cmake -S .mega-sdk-src --preset mega-android \
               -B ".mega-build-${ABI}" \
@@ -102,14 +101,12 @@ jobs:
           cat > .mega-aar/build.gradle.kts <<'EOF'
           plugins {
               id("com.android.library") version "9.1.1" apply false
-              id("org.jetbrains.kotlin.android") version "2.3.10" apply false
           }
           EOF
 
           cat > .mega-aar/sdk/build.gradle.kts <<'EOF'
           plugins {
               id("com.android.library")
-              id("org.jetbrains.kotlin.android")
           }
 
           android {
@@ -119,12 +116,6 @@ jobs:
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
                   targetCompatibility = JavaVersion.VERSION_17
-              }
-          }
-
-          kotlin {
-              compilerOptions {
-                  jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
               }
           }
 
@@ -158,4 +149,5 @@ jobs:
             exit 0
           fi
           git commit -m "build: vendor MEGA SDK v10.19.0 Android AAR"
+          git pull --rebase origin feature/cloud-sync-schedule-presets-notifications
           git push origin HEAD:feature/cloud-sync-schedule-presets-notifications
