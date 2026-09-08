@@ -50,7 +50,6 @@ jobs:
               -DANDROID_PLATFORM=28 \
               -DCMAKE_BUILD_TYPE=Release \
               -DENABLE_CHAT=OFF \
-              -DENABLE_SYNC=OFF \
               -DENABLE_ISOLATED_GFX=OFF \
               -DENABLE_MEDIA_FILE_METADATA=OFF \
               -DENABLE_SDKLIB_EXAMPLES=OFF \
