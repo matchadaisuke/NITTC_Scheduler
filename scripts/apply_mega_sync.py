@@ -26,7 +26,7 @@ replace_once(
 replace_once(
     build,
     'dependencies {\n',
-    '''dependencies {\n    val megaSdkAar = file("libs/mega-sdk.aar")\n    if (megaSdkAar.exists()) {\n        implementation(files(megaSdkAar))\n    }\n\n'''
+    '''dependencies {\n    val megaSdkAar = file("libs/mega-sdk.aar")\n    if (megaSdkAar.exists()) {\n        implementation(files(megaSdkAar))\n    }\n    implementation("androidx.exifinterface:exifinterface:1.3.7")\n    implementation("org.jetbrains:annotations:24.1.0")\n\n'''
 )
 
 # Keep MEGA's SWIG/JNI-facing classes when release minification is enabled.
@@ -63,7 +63,9 @@ internal fun CloudFileSyncSettingsContent() {
     var password by remember { mutableStateOf("") }
     var pin by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    val sdkAvailable = remember { CloudFileSyncManager.sdkAvailable() }
+    val sdkAvailable = remember {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && CloudFileSyncManager.sdkAvailable()
+    }
     val appKeyConfigured = CloudFileSyncManager.appKeyConfigured()
 
     Card(modifier = Modifier.fillMaxWidth()) {
