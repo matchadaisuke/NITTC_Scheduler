@@ -449,6 +449,7 @@ private fun NittcSchedulerContent(viewModel: SchedulerViewModel, startOnTimetabl
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showSpecialTimetableSettings by rememberSaveable { mutableStateOf(false) }
     var showSync by rememberSaveable { mutableStateOf(false) }
+    var showLegacySync by rememberSaveable { mutableStateOf(false) }
     var showSyncDiscovery by rememberSaveable { mutableStateOf(false) }
     var showNearbySync by rememberSaveable { mutableStateOf(false) }
     var showNearbyPermissionRationale by rememberSaveable { mutableStateOf(false) }
@@ -753,7 +754,10 @@ private fun NittcSchedulerContent(viewModel: SchedulerViewModel, startOnTimetabl
         }
     }
     BackHandler(enabled = showSyncDiscovery) { showSyncDiscovery = false }
-    BackHandler(enabled = showSync && !showSyncDiscovery && !showNearbySync) {
+    BackHandler(enabled = showLegacySync && !showSyncDiscovery && !showNearbySync) {
+        showLegacySync = false
+    }
+    BackHandler(enabled = showSync) {
         showSync = false
     }
     BackHandler(enabled = showAbout && !showOssLicenses) {
@@ -1617,6 +1621,7 @@ private fun NittcSchedulerContent(viewModel: SchedulerViewModel, startOnTimetabl
         showAbout -> "about"
         showNearbySync -> "nearbySync"
         showSyncDiscovery -> "syncDiscovery"
+        showLegacySync -> "legacySync"
         showSync -> "sync"
         showVlmImport -> "vlm"
         showSpecialTimetableSettings -> "specialTimetableSettings"
@@ -1936,6 +1941,7 @@ private fun NittcSchedulerContent(viewModel: SchedulerViewModel, startOnTimetabl
                         showSettings = true
                         showAbout = true
                     },
+                    onOpenLocalSync = { showLegacySync = true },
                     onToggleLocalAi = viewModel::toggleLocalAi,
                     onToggleNaturalLanguageTaskAdd = viewModel::toggleNaturalLanguageTaskAdd,
                     onToggleDrawerNavigation = viewModel::toggleDrawerNavigation,
@@ -2018,10 +2024,13 @@ private fun NittcSchedulerContent(viewModel: SchedulerViewModel, startOnTimetabl
                 )
             }
             "sync" -> {
+                MegaSyncScreen(onBack = { showSync = false })
+            }
+            "legacySync" -> {
                 SyncScreen(
                     state = uiState,
                     onBack = {
-                        showSync = false
+                        showLegacySync = false
                     },
                     onSaveProfile = { nickname, name, pw, autoSync, conflictAuto ->
                         viewModel.saveSyncProfile(nickname, name, pw, autoSync, conflictAuto)

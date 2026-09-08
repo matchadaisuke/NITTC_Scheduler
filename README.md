@@ -71,3 +71,24 @@ MIT Licenseです
 ## Custom fork features
 
 This branch adds provider-neutral cloud-file sync via Android's Storage Access Framework (Google Drive / Dropbox / OneDrive compatible without app-specific OAuth setup), up to five schedule presets, two start + two end lesson notifications with editable templates/variables, and optional Saturday classes. Full cloud backups include detailed schedule times and these customization settings; the existing SKTTP/local sync protocol is left unchanged.
+
+## MEGA standalone sync (custom fork)
+
+This fork can synchronize its full scheduler JSON directly with a MEGA account. End users only
+need to sign in with their MEGA email/password (and MFA code when enabled); no Android file picker
+or separate MEGA app is required. The password is not persisted. After login the MEGA session is
+stored and reused.
+
+The main sync button opens MEGA sync. The original local Wi-Fi / Nearby / trusted-device sync UI is
+kept under Settings as "旧・端末間同期" rather than being removed.
+
+Developer setup:
+
+1. Create a MEGA SDK application key for this app.
+2. Set `MEGA_APP_KEY=<key>` in `~/.gradle/gradle.properties`, or export it as an environment variable.
+3. Put the official MEGA Android SDK AAR at `app/libs/mega-sdk.aar` (the repository workflow can build
+   this from the pinned official MEGA SDK source).
+
+The MEGA sync feature is exposed on Android 9+ because that is the minimum Android version currently
+supported by the official MEGA Android SDK. The rest of NITTC Scheduler keeps its existing minSdk.
+

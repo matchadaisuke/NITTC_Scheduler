@@ -1641,8 +1641,17 @@ fun SettingsScreen(
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            AppSettingsCategory(title = "クラウド同期")
+            AppSettingsCategory(title = "同期")
             CloudFileSyncSettingsContent()
+            AppSettingsGroup {
+                item("legacy_local_sync") {
+                    AppSettingsNavigationItem(
+                        title = "旧・端末間同期",
+                        summary = "本家のWi-Fi / Nearby / 信頼済み端末による同期を利用します。",
+                        onClick = onOpenLocalSync
+                    )
+                }
+            }
         }
 
         // ── 設定データの移行 ───────────────────────────────────────

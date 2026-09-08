@@ -33,6 +33,11 @@ val buildNumberFiles = (
 
 val appCodeName = "Sist" // トリッカルから取ります
 val appVersionName = "1.1.0-IntDev"
+val megaAppKey = providers.gradleProperty("MEGA_APP_KEY")
+    .orElse(providers.environmentVariable("MEGA_APP_KEY"))
+    .orElse("")
+    .get()
+val megaAppKeyEscaped = megaAppKey.replace("\\", "\\\\").replace("\"", "\\\"")
 val buildContentHash = MessageDigest.getInstance("SHA-256").run {
     buildNumberFiles.forEach { file ->
         update(file.relativeTo(rootProject.projectDir).invariantSeparatorsPath.toByteArray())
@@ -293,6 +298,7 @@ android {
         versionCode = 18
         versionName = appVersionName
         buildConfigField("String", "BUILD_NUMBER", "\"$generatedBuildNumber\"")
+        buildConfigField("String", "MEGA_APP_KEY", "\"$megaAppKeyEscaped\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -333,6 +339,13 @@ kotlin {
 }
 
 dependencies {
+    val megaSdkAar = file("libs/mega-sdk.aar")
+    if (megaSdkAar.exists()) {
+        implementation(files(megaSdkAar))
+    }
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+    implementation("org.jetbrains:annotations:24.1.0")
+
     implementation("androidx.core:core-ktx:1.18.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.2")
