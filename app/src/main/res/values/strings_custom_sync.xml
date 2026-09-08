@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="sync_title_mega_sync">MEGA同期</string>
+    <string name="cd_open_mega_sync">MEGA同期を開く</string>
+    <string name="settings_legacy_local_sync_title">旧・端末間同期</string>
+    <string name="settings_legacy_local_sync_summary">本家のWi-Fi / Nearby / 信頼済み端末による同期を利用します。</string>
+</resources>
