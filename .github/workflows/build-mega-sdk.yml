@@ -25,6 +25,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Cache vcpkg binary archives
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: mega-vcpkg-${{ runner.os }}-v10.19.0-ndk27.1
+
       - name: Install native build prerequisites
         run: |
           sudo apt-get update
@@ -50,11 +56,11 @@ jobs:
               -DANDROID_PLATFORM=28 \
               -DCMAKE_BUILD_TYPE=Release \
               -DENABLE_CHAT=OFF \
+              -DENABLE_SYNC=ON \
               -DENABLE_ISOLATED_GFX=OFF \
               -DENABLE_MEDIA_FILE_METADATA=OFF \
               -DENABLE_SDKLIB_EXAMPLES=OFF \
               -DENABLE_SDKLIB_TESTS=OFF \
-              -DUSE_LIBUV=OFF \
               -DUSE_PDFIUM=OFF \
               -DUSE_FREEIMAGE=OFF \
               -DUSE_FFMPEG=OFF \
