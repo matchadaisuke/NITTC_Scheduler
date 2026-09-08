@@ -24,6 +24,8 @@ jobs:
           java-version: '17'
       - name: Apply source transformation
         run: python3 scripts/apply_customization.py
+      - name: Prepare Gradle wrapper
+        run: chmod +x gradlew
       - name: Compile Kotlin
         run: ./gradlew :app:compileDebugKotlin
       - name: Run unit tests
