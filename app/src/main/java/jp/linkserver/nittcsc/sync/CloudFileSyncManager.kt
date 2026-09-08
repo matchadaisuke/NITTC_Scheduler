@@ -189,7 +189,7 @@ object CloudFileSyncManager {
     private fun registerDatabaseObserver(context: Context) {
         if (databaseObserver != null) return
         val db = AppDatabase.getInstance(context)
-        val observer = object : InvalidationTracker.Observer(*watchedTables) {
+        val observer = object : InvalidationTracker.Observer(watchedTables) {
             override fun onInvalidated(tables: Set<String>) {
                 if (applyingRemote.get()) return
                 markLocalDirty(context)

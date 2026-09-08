@@ -2006,6 +2006,11 @@ private fun NittcSchedulerContent(viewModel: SchedulerViewModel, startOnTimetabl
                         abMultiDayDragHintShownForCurrentVisit = false
                         abCustomLongPressHintShownForCurrentVisit = false
                     },
+                    onToggleSaturdayClasses = viewModel::toggleSaturdayClasses,
+                    onSaveSchedulePreset = viewModel::saveSchedulePreset,
+                    onApplySchedulePreset = viewModel::applySchedulePreset,
+                    onDeleteSchedulePreset = viewModel::deleteSchedulePreset,
+                    onUpdateLessonNotificationCustomization = viewModel::updateLessonNotificationCustomization,
                     onUpdateScheduleSettings = viewModel::updateScheduleSettingsSilently,
                     onUpdateExamTimetableSettings = viewModel::updateExamTimetableSettings,
                     onExportAllAsJson = { viewModel.exportAllData() },
@@ -3132,20 +3137,17 @@ private fun TimetableInputScreen(
     onAutoSaveLesson: (Int, TimetableTerm, Int, Int, LessonDraft) -> Unit,
     onSaveLesson: (Int, TimetableTerm, Int, Int, LessonDraft) -> Unit
 ) {
-    val dayLabels = listOf(
-        DayOfWeek.MONDAY.value to R.string.weekday_monday,
-        DayOfWeek.TUESDAY.value to R.string.weekday_tuesday,
-        DayOfWeek.WEDNESDAY.value to R.string.weekday_wednesday,
-        DayOfWeek.THURSDAY.value to R.string.weekday_thursday,
-        DayOfWeek.FRIDAY.value to R.string.weekday_friday
-    )
-    val dayButtonLabels = listOf(
-        stringResource(R.string.weekday_monday),
-        stringResource(R.string.weekday_tuesday),
-        stringResource(R.string.weekday_wednesday),
-        stringResource(R.string.weekday_thursday),
-        stringResource(R.string.weekday_friday)
-    )
+    val dayLabels = buildList {
+        add(DayOfWeek.MONDAY.value to R.string.weekday_monday)
+        add(DayOfWeek.TUESDAY.value to R.string.weekday_tuesday)
+        add(DayOfWeek.WEDNESDAY.value to R.string.weekday_wednesday)
+        add(DayOfWeek.THURSDAY.value to R.string.weekday_thursday)
+        add(DayOfWeek.FRIDAY.value to R.string.weekday_friday)
+        if (state.settings?.enableSaturdayClasses == true) {
+            add(DayOfWeek.SATURDAY.value to R.string.weekday_saturday)
+        }
+    }
+    val dayButtonLabels = dayLabels.map { (_, labelRes) -> stringResource(labelRes) }
 
     Column(modifier = modifier.fillMaxSize()) {
         if (state.settings?.enableAbTimetable == true) {
@@ -3539,10 +3541,11 @@ private fun OutputScreen(
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val today = LocalDate.now()
-    val defaultWeekFocusDate = remember(today) {
-        when (today.dayOfWeek) {
-            DayOfWeek.SATURDAY -> today.plusDays(2)
-            DayOfWeek.SUNDAY -> today.plusDays(1)
+    val saturdayClassesEnabled = state.settings?.enableSaturdayClasses == true
+    val defaultWeekFocusDate = remember(today, saturdayClassesEnabled) {
+        when {
+            today.dayOfWeek == DayOfWeek.SUNDAY -> today.plusDays(1)
+            today.dayOfWeek == DayOfWeek.SATURDAY && !saturdayClassesEnabled -> today.plusDays(2)
             else -> today
         }
     }
@@ -3554,7 +3557,7 @@ private fun OutputScreen(
             onRequestedDayViewHandled()
         }
     }
-    val isTodayWeekend = today.dayOfWeek == DayOfWeek.SATURDAY || today.dayOfWeek == DayOfWeek.SUNDAY
+    val isTodayWeekend = today.dayOfWeek == DayOfWeek.SUNDAY || (today.dayOfWeek == DayOfWeek.SATURDAY && !saturdayClassesEnabled)
     val currentWeekReferenceDate = if (isTodayWeekend) defaultWeekFocusDate else today
     val weekDisplayReferenceDate = if (
         displayMode == OutputDisplayMode.WEEK &&
@@ -3572,7 +3575,7 @@ private fun OutputScreen(
     }
     val dayType = dayTypeForDate(selectedDate)
     val weekStart = weekDisplayReferenceDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-    val weekDates = remember(weekDisplayReferenceDate) { (0L..4L).map { weekStart.plusDays(it) } }
+    val weekDates = remember(weekDisplayReferenceDate, saturdayClassesEnabled) { (0L..if (saturdayClassesEnabled) 5L else 4L).map { weekStart.plusDays(it) } }
     val tasksByDueDate = remember(state.tasks) { state.tasks.groupBy { it.dueDate } }
     val plansByDueDate = remember(state.plans) { state.plans.groupBy { it.dueDate } }
     val isCurrentRangeToday = remember(displayMode, selectedDate, weekDates, today) {
@@ -4039,8 +4042,8 @@ private fun OutputScreen(
                             )
                         } else {
                             val pageWeekStart = pageDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-                            val pageWeekDates = remember(pageDate) {
-                                (0L..4L).map { pageWeekStart.plusDays(it) }
+                            val pageWeekDates = remember(pageDate, saturdayClassesEnabled) {
+                                (0L..if (saturdayClassesEnabled) 5L else 4L).map { pageWeekStart.plusDays(it) }
                             }
                             val pageWeekSlotsByDate = remember(
                                 pageWeekDates,
@@ -8227,7 +8230,7 @@ internal fun LessonOverrideDialog(
 ) {
     val effectiveShowDayTypeSelector = showDayTypeSelector && LocalAbTimetableEnabled.current
     var selectedDayOfWeek by remember(date, currentOverrideDayOfWeek) {
-        mutableStateOf(currentOverrideDayOfWeek ?: date.dayOfWeek.value.coerceIn(1, 5))
+        mutableStateOf(currentOverrideDayOfWeek ?: date.dayOfWeek.value.coerceIn(1, 6))
     }
     var scheduleOverrideEnabled by remember(date, currentOverrideDayOfWeek) {
         mutableStateOf(currentOverrideDayOfWeek != null)
@@ -8256,7 +8259,7 @@ internal fun LessonOverrideDialog(
     }
 
     val weekdayOptions = remember {
-        listOf(DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY)
+        listOf(DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY, DayOfWeek.SATURDAY)
     }
     val appliedDayType = if (effectiveShowDayTypeSelector) selectedDayType else currentDayType
     val holidayLabelOptions = remember {

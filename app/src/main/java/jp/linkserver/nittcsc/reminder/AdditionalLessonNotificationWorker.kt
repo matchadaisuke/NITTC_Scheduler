@@ -257,7 +257,7 @@ class AdditionalLessonNotificationWorker(
             )
         }
 
-        suspend fun findNextLesson(
+        internal suspend fun findNextLesson(
             context: Context,
             date: LocalDate,
             slotIndex: Int

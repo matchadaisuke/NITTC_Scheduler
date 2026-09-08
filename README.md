@@ -66,3 +66,8 @@ MIT Licenseです
 
 
 
+
+
+## Custom fork features
+
+This branch adds provider-neutral cloud-file sync via Android's Storage Access Framework (Google Drive / Dropbox / OneDrive compatible without app-specific OAuth setup), up to five schedule presets, two start + two end lesson notifications with editable templates/variables, and optional Saturday classes. Full cloud backups include detailed schedule times and these customization settings; the existing SKTTP/local sync protocol is left unchanged.

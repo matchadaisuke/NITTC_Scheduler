@@ -14,6 +14,7 @@ import jp.linkserver.nittcsc.data.UiDesignPreferences
 import jp.linkserver.nittcsc.reminder.LessonStartNotificationWorker
 import jp.linkserver.nittcsc.reminder.PlanReminderWorker
 import jp.linkserver.nittcsc.reminder.TaskReminderWorker
+import jp.linkserver.nittcsc.sync.CloudFileSyncManager
 import jp.linkserver.nittcsc.sync.LocalSyncManager
 import jp.linkserver.nittcsc.sync.NearbySyncManager
 import jp.linkserver.nittcsc.ui.NittcSchedulerApp
@@ -43,6 +44,7 @@ class MainActivity : ComponentActivity() {
                 NittcSchedulerApp(viewModel = viewModel)
             }
         }
+        CloudFileSyncManager.start(this)
         // WorkManager による定期ウィジェット更新をスケジュール
         WidgetUpdateWorker.schedule(this)
         lifecycleScope.launch {
@@ -60,6 +62,9 @@ class MainActivity : ComponentActivity() {
             WidgetUpdater.updateTaskWidgets(this@MainActivity)
             WidgetUpdater.updateAll(this@MainActivity)
             viewModel.runAutoSync()
+            if (CloudFileSyncManager.isConfigured(this@MainActivity)) {
+                CloudFileSyncManager.syncNow(this@MainActivity)
+            }
         }
     }
 }
