@@ -28,13 +28,14 @@ jobs:
       - name: Install native build prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y swig ninja-build pkg-config
+          sudo apt-get install -y swig ninja-build pkg-config build-essential
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;27.1.12297006"
 
       - name: Checkout official MEGA SDK and vcpkg
         run: |
           git clone --depth 1 --branch v10.19.0 https://github.com/meganz/sdk.git .mega-sdk-src
-          git clone --depth 1 https://github.com/microsoft/vcpkg.git .mega-vcpkg
+          # MEGA's vcpkg manifest pins a baseline commit, so the versions history must be available.
+          git clone https://github.com/microsoft/vcpkg.git .mega-vcpkg
           ./.mega-vcpkg/bootstrap-vcpkg.sh -disableMetrics
 
       - name: Build MEGA JNI and Java bindings
