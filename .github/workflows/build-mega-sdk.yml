@@ -113,7 +113,9 @@ jobs:
           android {
               namespace = "nz.mega.sdk"
               compileSdk = 36
-              defaultConfig { minSdk = 28 }
+              // Keep the containing app's minSdk at 26. The MEGA native library itself is
+              // built for API 28 and NITTC Scheduler never loads it below Android 9.
+              defaultConfig { minSdk = 26 }
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
                   targetCompatibility = JavaVersion.VERSION_17
