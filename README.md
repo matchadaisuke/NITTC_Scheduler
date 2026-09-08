@@ -70,25 +70,20 @@ MIT Licenseです
 
 ## Custom fork features
 
-This branch adds provider-neutral cloud-file sync via Android's Storage Access Framework (Google Drive / Dropbox / OneDrive compatible without app-specific OAuth setup), up to five schedule presets, two start + two end lesson notifications with editable templates/variables, and optional Saturday classes. Full cloud backups include detailed schedule times and these customization settings; the existing SKTTP/local sync protocol is left unchanged.
+このカスタマイズフォークでは、MEGAアカウントへ直接ログインして行うアプリ単体の同期、最大5件の時程プリセット、授業開始前2件＋終了前2件の通知カスタマイズ、通知テンプレート変数、土曜授業のオン／オフに対応しています。MEGA同期では授業時刻を含むフルJSONデータを同期し、本家のSKTTP / Wi-Fi / Nearby / 信頼済み端末による同期実装は削除せず設定画面に残しています。
 
 ## MEGA standalone sync (custom fork)
 
-This fork can synchronize its full scheduler JSON directly with a MEGA account. End users only
-need to sign in with their MEGA email/password (and MFA code when enabled); no Android file picker
-or separate MEGA app is required. The password is not persisted. After login the MEGA session is
-stored and reused.
+利用者はアプリ内でMEGAのメールアドレス／パスワード（2段階認証を利用している場合は認証コード）を入力するだけで同期できます。AndroidのファイルピッカーやMEGAアプリは不要です。パスワードは保存せず、ログイン成功後はMEGAのセッショントークンを保存して次回以降のログインに再利用します。
 
-The main sync button opens MEGA sync. The original local Wi-Fi / Nearby / trusted-device sync UI is
-kept under Settings as "旧・端末間同期" rather than being removed.
+メイン画面の同期ボタン／同期メニューはMEGA同期画面を開きます。本家のローカルWi-Fi / Nearby / 信頼済み端末同期は、設定の「旧・端末間同期」から引き続き利用できます。
+
+同期ファイルはMEGA内の `/NITTC Scheduler/scheduler-sync.json` に保存します。アプリ起動中はローカルDBの変更を検知して即時同期し、MEGA側のノード更新も監視します。バックグラウンドではWorkManagerによる定期同期をフォールバックとして使用します。
 
 Developer setup:
 
-1. Create a MEGA SDK application key for this app.
-2. Set `MEGA_APP_KEY=<key>` in `~/.gradle/gradle.properties`, or export it as an environment variable.
-3. Put the official MEGA Android SDK AAR at `app/libs/mega-sdk.aar` (the repository workflow can build
-   this from the pinned official MEGA SDK source).
+1. MEGA SDK用のApplication Keyを作成します。
+2. `MEGA_APP_KEY=<key>` を `~/.gradle/gradle.properties` に設定するか、環境変数 `MEGA_APP_KEY` として設定します。
+3. 公式MEGA Android SDK AARを `app/libs/mega-sdk.aar` に配置します。このブランチのGitHub Actionsは、固定した公式MEGA SDKソースからAARを生成できます。
 
-The MEGA sync feature is exposed on Android 9+ because that is the minimum Android version currently
-supported by the official MEGA Android SDK. The rest of NITTC Scheduler keeps its existing minSdk.
-
+MEGA SDKの実行はAndroid 9以降で有効にしています。NITTC Scheduler本体の既存minSdkは変更していません。
