@@ -102,12 +102,14 @@ jobs:
           cat > .mega-aar/build.gradle.kts <<'EOF'
           plugins {
               id("com.android.library") version "9.1.1" apply false
+              id("org.jetbrains.kotlin.android") version "2.3.10" apply false
           }
           EOF
 
           cat > .mega-aar/sdk/build.gradle.kts <<'EOF'
           plugins {
               id("com.android.library")
+              id("org.jetbrains.kotlin.android")
           }
 
           android {
@@ -119,6 +121,12 @@ jobs:
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
                   targetCompatibility = JavaVersion.VERSION_17
+              }
+          }
+
+          kotlin {
+              compilerOptions {
+                  jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
               }
           }
 
