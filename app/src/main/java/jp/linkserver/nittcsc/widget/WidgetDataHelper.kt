@@ -106,7 +106,7 @@ object WidgetDataHelper {
     }
 
     fun defaultDayType(date: LocalDate): DayType {
-        val weekend = date.dayOfWeek.value >= DayOfWeek.SATURDAY.value
+        val weekend = date.dayOfWeek == DayOfWeek.SUNDAY
         return if (weekend || JapaneseHolidayCalculator.isHoliday(date)) DayType.HOLIDAY else DayType.A
     }
 
@@ -119,7 +119,7 @@ object WidgetDataHelper {
         changedLessons: Map<Pair<LocalDate, Int>, ChangedLessonEntity> = emptyMap(),
         semesterTimetablesEnabled: Boolean = false
     ): ResolvedLesson? {
-        if (date.dayOfWeek.value !in 1..5) return null
+        if (date.dayOfWeek == DayOfWeek.SUNDAY) return null
         val dayTypeEntity = dayTypeEntities[date]
         val dayType = dayTypeEntity?.dayType ?: dayTypeMap[date] ?: defaultDayType(date)
         if (dayType == DayType.HOLIDAY) return null

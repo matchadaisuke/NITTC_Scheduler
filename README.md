@@ -66,3 +66,38 @@ MIT Licenseです
 
 
 
+
+
+## Custom fork features
+
+このカスタマイズフォークでは、MEGAアカウントへ直接ログインして行うアプリ単体の同期、最大5件の時程プリセット、授業開始前2件＋終了前2件の通知カスタマイズ、通知テンプレート変数、土曜授業のオン／オフに対応しています。MEGA同期では授業時刻を含むフルJSONデータを同期し、本家のSKTTP / Wi-Fi / Nearby / 信頼済み端末による同期実装は削除せず設定画面に残しています。
+
+## MEGA standalone sync (custom fork)
+
+利用者はアプリ内でMEGAのメールアドレス／パスワード（2段階認証を利用している場合は認証コード）を入力するだけで同期できます。AndroidのファイルピッカーやMEGAアプリは不要です。パスワードは保存せず、ログイン成功後はMEGAのセッショントークンを保存して次回以降のログインに再利用します。
+
+メイン画面の同期ボタン／同期メニューはMEGA同期画面を開きます。本家のローカルWi-Fi / Nearby / 信頼済み端末同期は、設定の「旧・端末間同期」から引き続き利用できます。
+
+同期ファイルはMEGA内の `/NITTC Scheduler/scheduler-sync.json` に保存します。アプリ起動中はローカルDBの変更を検知して即時同期し、MEGA側のノード更新も監視します。バックグラウンドではWorkManagerによる定期同期をフォールバックとして使用します。
+
+Developer setup:
+
+1. MEGA SDK用のApplication Keyを作成します。
+2. `MEGA_APP_KEY=<key>` を `~/.gradle/gradle.properties` に設定するか、環境変数 `MEGA_APP_KEY` として設定します。
+3. 公式MEGA Android SDK AARを `app/libs/mega-sdk.aar` に配置します。このブランチのGitHub Actionsは、固定した公式MEGA SDKソースからAARを生成できます。
+
+MEGA SDKの実行はAndroid 9以降で有効にしています。NITTC Scheduler本体の既存minSdkは変更していません。
+
+## Manual Android release
+
+GitHub Actionsの `Build and release Android app` を手動実行すると、指定したVersion Name / Version Codeでテスト、Lint、署名付きRelease APKのビルド、署名とバージョンの検証、GitHub Releaseへの公開を一度に実行します。
+
+初回実行前に、リポジトリのActions secretsへ次を登録してください。
+
+* `MEGA_APP_KEY`
+* `NITTC_RELEASE_KEYSTORE_BASE64`（リリース用JKSをBase64化した値）
+* `NITTC_RELEASE_STORE_PASSWORD`
+* `NITTC_RELEASE_KEY_ALIAS`
+* `NITTC_RELEASE_KEY_PASSWORD`
+
+同じVersion Nameのリリースタグが既に存在する場合や、必須secretが不足している場合は公開せずに失敗します。

@@ -91,6 +91,10 @@
             android:exported="false" />
 
         <receiver
+            android:name=".reminder.AdditionalLessonNotificationAlarmReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".reminder.TaskReminderAlarmReceiver"
             android:exported="false" />
 

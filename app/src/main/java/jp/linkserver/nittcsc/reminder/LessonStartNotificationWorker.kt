@@ -35,6 +35,10 @@ import jp.linkserver.nittcsc.data.LessonMode
 import jp.linkserver.nittcsc.data.lessonKey
 import jp.linkserver.nittcsc.data.LessonStartNotificationChipMode
 import jp.linkserver.nittcsc.data.LessonNotificationExclusionEntity
+import jp.linkserver.nittcsc.data.LessonNotificationCustomization
+import jp.linkserver.nittcsc.data.LessonNotificationTemplateValues
+import jp.linkserver.nittcsc.data.lessonNotificationCustomization
+import jp.linkserver.nittcsc.data.renderLessonNotificationTemplate
 import jp.linkserver.nittcsc.data.ResolvedLesson
 import jp.linkserver.nittcsc.data.SettingsEntity
 import jp.linkserver.nittcsc.logic.ClassSlot
@@ -65,6 +69,9 @@ class LessonStartNotificationWorker(
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
 
+    private var customConfig: LessonNotificationCustomization? = null
+    private var nextLessonForTemplate: NextLessonSnapshot? = null
+
     override suspend fun doWork(): Result {
         val date = runCatching { LocalDate.parse(inputData.getString(KEY_DATE).orEmpty()) }
             .getOrNull()
@@ -75,6 +82,8 @@ class LessonStartNotificationWorker(
         val dao = AppDatabase.getInstance(applicationContext).schedulerDao()
         val settings = dao.getSettings() ?: return Result.success()
         if (!settings.lessonStartNotificationEnabled) return Result.success()
+        customConfig = settings.lessonNotificationCustomization()
+        if (customConfig?.startTriggers?.firstOrNull()?.enabled != true) return Result.success()
 
         val specialLabel = dao.getDayType(date)?.holidaySpecialLabel
         val examLessonsForDate = dao.getExamLessonsForDate(date)
@@ -107,6 +116,7 @@ class LessonStartNotificationWorker(
         } ?: return Result.success()
         if (lesson.subject.isBlank()) return Result.success()
         if (isExcluded(lesson, dao.getLessonNotificationExclusionsOnce())) return Result.success()
+        nextLessonForTemplate = AdditionalLessonNotificationWorker.findNextLesson(applicationContext, date, slotIndex)
 
         createNotificationChannel()
 
@@ -213,17 +223,31 @@ class LessonStartNotificationWorker(
         slot: ClassSlot,
         pendingIntent: PendingIntent
     ): Notification {
+        val next = nextLessonForTemplate
+        val values = LessonNotificationTemplateValues(
+            subject = lesson.subject,
+            teacher = lesson.teacher,
+            location = lesson.location.orEmpty(),
+            period = slot.label,
+            startTime = slot.start.toString(),
+            endTime = slot.end.toString(),
+            minutes = minutesBefore,
+            nextSubject = next?.subject ?: "なし",
+            nextTeacher = next?.teacher.orEmpty(),
+            nextLocation = next?.location.orEmpty(),
+            nextPeriod = next?.period.orEmpty(),
+            nextStartTime = next?.start?.toString().orEmpty()
+        )
+        val config = customConfig ?: LessonNotificationCustomization.defaults(minutesBefore)
+        val title = renderLessonNotificationTemplate(config.startTitleTemplate, values)
+            .ifBlank { applicationContext.getString(R.string.lesson_start_notification_title) }
+        val body = renderLessonNotificationTemplate(config.startBodyTemplate, values)
+            .ifBlank { buildNotificationBody(minutesBefore, lesson, slot) }
         return NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification_school)
-            .setContentTitle(applicationContext.getString(R.string.lesson_start_notification_title))
-            .setContentText(
-                buildLessonStartText(minutesBefore, lesson.subject)
-            )
-            .setStyle(
-                NotificationCompat.BigTextStyle().bigText(
-                    buildNotificationBody(minutesBefore, lesson, slot)
-                )
-            )
+            .setContentTitle(title)
+            .setContentText(body.lineSequence().firstOrNull().orEmpty())
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -497,7 +521,7 @@ class LessonStartNotificationWorker(
         changedLessons: Map<Pair<LocalDate, Int>, ChangedLessonEntity>,
         semesterTimetablesEnabled: Boolean
     ): ResolvedLesson? {
-        if (date.dayOfWeek.value !in 1..5) return null
+        if (date.dayOfWeek == DayOfWeek.SUNDAY) return null
         val dayTypeEntity = dayTypeEntities[date]
         val dayType = dayTypeEntity?.dayType ?: defaultDayType(date)
         if (dayType == DayType.HOLIDAY) return null
@@ -532,7 +556,7 @@ class LessonStartNotificationWorker(
     }
 
     private fun defaultDayType(date: LocalDate): DayType {
-        val weekend = date.dayOfWeek.value >= DayOfWeek.SATURDAY.value
+        val weekend = date.dayOfWeek == DayOfWeek.SUNDAY
         return if (weekend || JapaneseHolidayCalculator.isHoliday(date)) DayType.HOLIDAY else DayType.A
     }
 
@@ -581,6 +605,7 @@ class LessonStartNotificationWorker(
 
         suspend fun rescheduleAll(context: Context) {
             val appContext = context.applicationContext
+            AdditionalLessonNotificationWorker.rescheduleAll(appContext)
             rescheduleMutex.withLock {
                 withContext(Dispatchers.IO) {
                     WorkManager.getInstance(appContext)
@@ -597,6 +622,8 @@ class LessonStartNotificationWorker(
             val dao = AppDatabase.getInstance(context).schedulerDao()
             val settings = dao.getSettings() ?: return
             if (!settings.lessonStartNotificationEnabled) return
+            val primaryTrigger = settings.lessonNotificationCustomization().startTriggers.firstOrNull() ?: return
+            if (!primaryTrigger.enabled) return
 
             val today = LocalDate.now()
             val now = LocalDateTime.now(ZoneId.systemDefault())
@@ -618,7 +645,7 @@ class LessonStartNotificationWorker(
                     }
                 }
             val exclusions = dao.getLessonNotificationExclusionsOnce()
-            val minutesBefore = settings.lessonStartNotificationMinutesBefore.coerceIn(0, 360).toLong()
+            val minutesBefore = primaryTrigger.minutesBefore.coerceIn(0, 360).toLong()
             val potentialLiveUpdates =
                 settings.lessonStartNotificationLiveUpdatesEnabled &&
                     Build.VERSION.SDK_INT >= 36 &&
@@ -800,7 +827,7 @@ class LessonStartNotificationWorker(
             changedLessons: Map<Pair<LocalDate, Int>, ChangedLessonEntity>,
             semesterTimetablesEnabled: Boolean
         ): ResolvedLesson? {
-            if (date.dayOfWeek.value !in 1..5) return null
+            if (date.dayOfWeek == DayOfWeek.SUNDAY) return null
             val dayTypeEntity = dayTypeEntities[date]
             val dayType = dayTypeEntity?.dayType ?: defaultDayTypeForSchedule(date)
             if (dayType == DayType.HOLIDAY) return null
@@ -835,7 +862,7 @@ class LessonStartNotificationWorker(
         }
 
         private fun defaultDayTypeForSchedule(date: LocalDate): DayType {
-            val weekend = date.dayOfWeek.value >= DayOfWeek.SATURDAY.value
+            val weekend = date.dayOfWeek == DayOfWeek.SUNDAY
             return if (weekend || JapaneseHolidayCalculator.isHoliday(date)) DayType.HOLIDAY else DayType.A
         }
 

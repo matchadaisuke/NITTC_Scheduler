@@ -16,7 +16,7 @@ internal class SchedulerDataTransfer(
     private val dao: SchedulerDao = db.schedulerDao()
 
     private companion object {
-        const val CURRENT_EXPORT_VERSION = 15
+        const val CURRENT_EXPORT_VERSION = 16
         const val MIN_SUPPORTED_IMPORT_VERSION = 1
         const val DATASET_TASKS = SchedulerRepository.DATASET_TASKS
         const val DATASET_PLANS = SchedulerRepository.DATASET_PLANS
@@ -103,6 +103,9 @@ internal class SchedulerDataTransfer(
                 s.put("examFirstPeriodStartMinute", settings.examFirstPeriodStartMinute)
                 s.put("examArrivalHour", settings.examArrivalHour)
                 s.put("examArrivalMinute", settings.examArrivalMinute)
+                s.put("enableSaturdayClasses", settings.enableSaturdayClasses)
+                s.put("schedulePresetsJson", settings.schedulePresetsJson)
+                s.put("lessonNotificationConfigJson", settings.lessonNotificationConfigJson)
             })
         }
 
@@ -769,7 +772,10 @@ internal class SchedulerDataTransfer(
                 examFirstPeriodStartHour = s.optInt("examFirstPeriodStartHour", 8).coerceIn(0, 23),
                 examFirstPeriodStartMinute = s.optInt("examFirstPeriodStartMinute", 50).coerceIn(0, 59),
                 examArrivalHour = s.optInt("examArrivalHour", 8).coerceIn(0, 23),
-                examArrivalMinute = s.optInt("examArrivalMinute", 30).coerceIn(0, 59)
+                examArrivalMinute = s.optInt("examArrivalMinute", 30).coerceIn(0, 59),
+                enableSaturdayClasses = s.optBoolean("enableSaturdayClasses", false),
+                schedulePresetsJson = s.optString("schedulePresetsJson", ""),
+                lessonNotificationConfigJson = s.optString("lessonNotificationConfigJson", "")
             )
         }
 
@@ -829,7 +835,7 @@ internal class SchedulerDataTransfer(
                     dayTypeEntities += DayTypeEntity(
                         date = LocalDate.parse(obj.getString("date")),
                         dayType = DayType.valueOf(obj.getString("dayType")),
-                        overrideLessonDayOfWeek = obj.optInt("overrideLessonDayOfWeek", -1).takeIf { it in 1..5 },
+                        overrideLessonDayOfWeek = obj.optInt("overrideLessonDayOfWeek", -1).takeIf { it in 1..6 },
                         overrideLessonDayType = obj.optString("overrideLessonDayType", "")
                             .takeIf { it.isNotBlank() }
                             ?.let { DayType.valueOf(it) },

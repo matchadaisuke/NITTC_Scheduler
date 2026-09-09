@@ -1,0 +1,160 @@
+name: Build and release Android app
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: Version name, for example 1.1.0
+        required: true
+        type: string
+      version_code:
+        description: Positive Android version code, for example 18
+        required: true
+        type: string
+      release_notes:
+        description: Optional release notes; generated notes are used when empty
+        required: false
+        type: string
+      prerelease:
+        description: Publish as a prerelease
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      VERSION_NAME: ${{ inputs.version_name }}
+      VERSION_CODE: ${{ inputs.version_code }}
+      MEGA_APP_KEY: ${{ secrets.MEGA_APP_KEY }}
+      KEYSTORE_BASE64: ${{ secrets.NITTC_RELEASE_KEYSTORE_BASE64 }}
+      NITTC_RELEASE_STORE_PASSWORD: ${{ secrets.NITTC_RELEASE_STORE_PASSWORD }}
+      NITTC_RELEASE_KEY_ALIAS: ${{ secrets.NITTC_RELEASE_KEY_ALIAS }}
+      NITTC_RELEASE_KEY_PASSWORD: ${{ secrets.NITTC_RELEASE_KEY_PASSWORD }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Validate release inputs and secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$VERSION_NAME" =~ ^[0-9A-Za-z][0-9A-Za-z._+-]*$ ]] || {
+            echo "::error::version_name contains unsupported characters"
+            exit 1
+          }
+          [[ "$VERSION_CODE" =~ ^[1-9][0-9]*$ ]] || {
+            echo "::error::version_code must be a positive integer"
+            exit 1
+          }
+          for name in MEGA_APP_KEY KEYSTORE_BASE64 NITTC_RELEASE_STORE_PASSWORD NITTC_RELEASE_KEY_ALIAS NITTC_RELEASE_KEY_PASSWORD; do
+            [[ -n "${!name:-}" ]] || {
+              echo "::error::Required GitHub Actions secret is missing: $name"
+              exit 1
+            }
+          done
+          test -s app/libs/mega-sdk.aar || {
+            echo "::error::app/libs/mega-sdk.aar is missing"
+            exit 1
+          }
+          tag="v${VERSION_NAME}"
+          if git rev-parse "$tag" >/dev/null 2>&1 || gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::Release tag already exists: $tag"
+            exit 1
+          fi
+
+      - name: Restore release signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          export NITTC_RELEASE_STORE_FILE="$RUNNER_TEMP/nittc-scheduler-release.jks"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$NITTC_RELEASE_STORE_FILE"
+          test -s "$NITTC_RELEASE_STORE_FILE"
+          echo "NITTC_RELEASE_STORE_FILE=$NITTC_RELEASE_STORE_FILE" >> "$GITHUB_ENV"
+
+      - name: Test, lint, and build signed release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew \
+            -Dorg.gradle.java.home="$JAVA_HOME" \
+            -PAPP_VERSION_NAME="$VERSION_NAME" \
+            -PAPP_VERSION_CODE="$VERSION_CODE" \
+            :app:testDebugUnitTest \
+            :app:lintDebug \
+            :app:assembleRelease \
+            --stacktrace
+
+      - name: Verify and stage APK
+        id: artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          [[ -n "$apk" && -s "$apk" ]] || {
+            echo "::error::Release APK was not produced"
+            exit 1
+          }
+          apksigner="$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner -print | sort -V | tail -n 1)"
+          aapt="$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name aapt -print | sort -V | tail -n 1)"
+          [[ -x "$apksigner" && -x "$aapt" ]] || {
+            echo "::error::Android APK verification tools were not found"
+            exit 1
+          }
+          "$apksigner" verify --verbose --print-certs "$apk"
+          badging="$("$aapt" dump badging "$apk" | head -n 1)"
+          grep -Fq "versionCode='$VERSION_CODE'" <<< "$badging"
+          grep -Fq "versionName='$VERSION_NAME'" <<< "$badging"
+          mkdir -p dist
+          output="dist/NITTC-Scheduler-v${VERSION_NAME}.apk"
+          cp "$apk" "$output"
+          sha256sum "$output" > "${output}.sha256"
+          echo "apk=$output" >> "$GITHUB_OUTPUT"
+          echo "checksum=${output}.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+          PRERELEASE: ${{ inputs.prerelease }}
+          APK_PATH: ${{ steps.artifact.outputs.apk }}
+          CHECKSUM_PATH: ${{ steps.artifact.outputs.checksum }}
+        run: |
+          set -euo pipefail
+          tag="v${VERSION_NAME}"
+          args=(
+            "$tag"
+            "$APK_PATH#NITTC Scheduler v${VERSION_NAME} APK"
+            "$CHECKSUM_PATH#SHA-256 checksum"
+            --target "$GITHUB_SHA"
+            --title "NITTC Scheduler v${VERSION_NAME}"
+          )
+          if [[ "$PRERELEASE" == "true" ]]; then
+            args+=(--prerelease)
+          fi
+          if [[ -n "$RELEASE_NOTES" ]]; then
+            notes_file="$RUNNER_TEMP/release-notes.md"
+            printf '%s\n' "$RELEASE_NOTES" > "$notes_file"
+            args+=(--notes-file "$notes_file")
+          else
+            args+=(--generate-notes)
+          fi
+          gh release create "${args[@]}"

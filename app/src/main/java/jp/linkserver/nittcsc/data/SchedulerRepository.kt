@@ -38,7 +38,7 @@ class SchedulerRepository(
     private val dataTransfer = SchedulerDataTransfer(this, db)
 
     companion object {
-        private const val CURRENT_EXPORT_VERSION = 15
+        private const val CURRENT_EXPORT_VERSION = 16
         private const val MIN_SUPPORTED_IMPORT_VERSION = 1
         private const val MAX_FUTURE_META_DRIFT_MS = 5 * 60 * 1000L
         const val DATASET_TASKS = "tasks"
@@ -462,9 +462,102 @@ class SchedulerRepository(
 
     suspend fun updateLessonStartNotificationMinutesBefore(minutesBefore: Int) {
         val current = dao.getSettings() ?: return
+        val normalized = minutesBefore.coerceIn(0, 360)
+        val config = current.lessonNotificationCustomization()
+        val starts = config.startTriggers.toMutableList().also { list ->
+            if (list.isNotEmpty()) list[0] = list[0].copy(minutesBefore = normalized)
+        }
         dao.upsertSettings(
             current.copy(
-                lessonStartNotificationMinutesBefore = minutesBefore.coerceIn(0, 360)
+                lessonStartNotificationMinutesBefore = normalized,
+                lessonNotificationConfigJson = encodeLessonNotificationCustomization(
+                    config.copy(startTriggers = starts)
+                )
+            )
+        )
+    }
+
+    suspend fun toggleSaturdayClasses(enabled: Boolean) {
+        val current = dao.getSettings() ?: return
+        dao.upsertSettings(current.copy(enableSaturdayClasses = enabled))
+        if (enabled) {
+            var date = current.termStart
+            while (!date.isAfter(current.termEnd)) {
+                if (date.dayOfWeek == DayOfWeek.SATURDAY) {
+                    dao.upsertDayType(DayTypeEntity(date = date, dayType = DayType.A))
+                }
+                date = date.plusDays(1)
+            }
+        }
+        ensureLessonRows()
+        syncDayTypes()
+    }
+
+    suspend fun saveSchedulePreset(name: String) {
+        val current = dao.getSettings() ?: return
+        val normalizedName = name.trim()
+        if (normalizedName.isBlank()) return
+        val presets = current.schedulePresets().toMutableList()
+        val existingIndex = presets.indexOfFirst { it.name.equals(normalizedName, ignoreCase = true) }
+        val id = presets.getOrNull(existingIndex)?.id ?: java.util.UUID.randomUUID().toString()
+        val preset = SchedulePreset.fromSettings(current, id, normalizedName)
+        if (existingIndex >= 0) {
+            presets[existingIndex] = preset
+        } else if (presets.size < 5) {
+            presets += preset
+        } else {
+            return
+        }
+        dao.upsertSettings(current.copy(schedulePresetsJson = encodeSchedulePresets(presets)))
+    }
+
+    suspend fun deleteSchedulePreset(id: String) {
+        val current = dao.getSettings() ?: return
+        dao.upsertSettings(
+            current.copy(
+                schedulePresetsJson = encodeSchedulePresets(current.schedulePresets().filterNot { it.id == id })
+            )
+        )
+    }
+
+    suspend fun applySchedulePreset(id: String) {
+        val current = dao.getSettings() ?: return
+        val preset = current.schedulePresets().firstOrNull { it.id == id } ?: return
+        dao.upsertSettings(
+            current.copy(
+                periodsPerDay = preset.periodsPerDay,
+                periodDurationMin = preset.periodDurationMin,
+                breakBetweenPeriodsMin = preset.breakBetweenPeriodsMin,
+                lunchBreakMin = preset.lunchBreakMin,
+                lunchAfterPeriod = preset.lunchAfterPeriod.coerceIn(0, preset.periodsPerDay),
+                firstPeriodStartHour = preset.firstPeriodStartHour,
+                firstPeriodStartMinute = preset.firstPeriodStartMinute,
+                periodLabelStyle = preset.periodLabelStyle,
+                useKosenMode = preset.periodLabelStyle == PeriodLabelStyle.PAIR_KOSHI,
+                arrivalHour = preset.arrivalHour,
+                arrivalMinute = preset.arrivalMinute,
+                departureHour = preset.departureHour,
+                departureMinute = preset.departureMinute
+            )
+        )
+        ensureLessonRows()
+    }
+
+    suspend fun updateLessonNotificationCustomization(config: LessonNotificationCustomization) {
+        val current = dao.getSettings() ?: return
+        val normalizedStarts = (0..1).map { index ->
+            config.startTriggers.getOrNull(index)
+                ?: LessonNotificationCustomization.defaults(current.lessonStartNotificationMinutesBefore).startTriggers[index]
+        }
+        val normalizedEnds = (0..1).map { index ->
+            config.endTriggers.getOrNull(index)
+                ?: LessonNotificationCustomization.defaults(current.lessonStartNotificationMinutesBefore).endTriggers[index]
+        }
+        val normalized = config.copy(startTriggers = normalizedStarts, endTriggers = normalizedEnds)
+        dao.upsertSettings(
+            current.copy(
+                lessonStartNotificationMinutesBefore = normalizedStarts.first().minutesBefore.coerceIn(0, 360),
+                lessonNotificationConfigJson = encodeLessonNotificationCustomization(normalized)
             )
         )
     }
@@ -578,8 +671,10 @@ class SchedulerRepository(
     suspend fun upsertLessonOverride(date: LocalDate, dayOfWeek: Int, dayType: DayType) {
         db.withTransaction {
             val existing = dao.getDayType(date)
+            val saturdayDisabled = date.dayOfWeek == DayOfWeek.SATURDAY &&
+                dao.getSettings()?.enableSaturdayClasses != true
             val currentDayType = existing?.dayType ?: if (
-                date.dayOfWeek == DayOfWeek.SATURDAY ||
+                saturdayDisabled ||
                 date.dayOfWeek == DayOfWeek.SUNDAY ||
                 JapaneseHolidayCalculator.isHoliday(date)
             ) {
@@ -797,7 +892,7 @@ class SchedulerRepository(
 
         val rebuilt = mutableListOf<DayTypeEntity>()
         for (date in ranges.flatMap { range -> range.start.toDateRange(range.endInclusive) }.distinct()) {
-            val autoHoliday = isAutoHoliday(date, breakRanges)
+            val autoHoliday = isAutoHoliday(date, breakRanges, settings.enableSaturdayClasses)
             val manual = existing[date]
             val resolved = when {
                 autoHoliday -> DayType.HOLIDAY
@@ -841,11 +936,12 @@ class SchedulerRepository(
                 // 週表示でも過去日は含めない:
                 // 平日: 今日〜今週金曜 / 土日: 次週月曜〜次週金曜
                 val startDate = when (today.dayOfWeek) {
-                    DayOfWeek.SATURDAY, DayOfWeek.SUNDAY -> today.with(TemporalAdjusters.next(DayOfWeek.MONDAY))
+                    DayOfWeek.SUNDAY -> today.with(TemporalAdjusters.next(DayOfWeek.MONDAY))
+                    DayOfWeek.SATURDAY -> if (settings.enableSaturdayClasses) today else today.with(TemporalAdjusters.next(DayOfWeek.MONDAY))
                     else -> today
                 }
                 val weekStart = startDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-                val weekEnd = weekStart.plusDays(4)
+                val weekEnd = weekStart.plusDays(if (settings.enableSaturdayClasses) 5 else 4)
                 maxOf(startDate, settings.termStart)..minOf(weekEnd, settings.termEnd)
             }
         }
@@ -878,7 +974,7 @@ class SchedulerRepository(
                         }
                     continue
                 }
-                if (date.dayOfWeek == DayOfWeek.SATURDAY || date.dayOfWeek == DayOfWeek.SUNDAY) continue
+                if (date.dayOfWeek == DayOfWeek.SUNDAY) continue
 
                 val dayTypeEntity = dayTypeMap[date]
                 val dayType = dayTypeEntity?.dayType ?: DayType.A
@@ -930,7 +1026,7 @@ class SchedulerRepository(
         val existing = dao.getLessonsOnce().associateBy { it.lessonKey() }
         var changed = false
         for (timetableTerm in timetableTerms) {
-            for (day in 1..5) {
+            for (day in 1..6) {
                 for (slot in 0 until periodsPerDay) {
                     val key = LessonKey(academicYear, timetableTerm, day, slot)
                     if (key !in existing) {
@@ -986,7 +1082,7 @@ class SchedulerRepository(
     }
 
     private suspend fun resolveBaseLessonForDate(date: LocalDate, slotIndex: Int): ResolvedLesson? {
-        if (date.dayOfWeek.value !in 1..5) return null
+        if (date.dayOfWeek == DayOfWeek.SUNDAY) return null
         val dayTypeEntity = dao.getDayType(date)
         val dayType = dayTypeEntity?.dayType ?: DayType.A
         if (dayType == DayType.HOLIDAY) return null
@@ -1007,7 +1103,7 @@ class SchedulerRepository(
     }
 
     private suspend fun resolveEffectiveLessonForDate(date: LocalDate, slotIndex: Int): ResolvedLesson? {
-        if (date.dayOfWeek.value !in 1..5) return null
+        if (date.dayOfWeek == DayOfWeek.SUNDAY) return null
         val dayType = dao.getDayType(date)?.dayType ?: DayType.A
         if (dayType == DayType.HOLIDAY) return null
         return applyChangedLesson(
@@ -1029,10 +1125,15 @@ class SchedulerRepository(
         )
     }
 
-    private fun isAutoHoliday(date: LocalDate, breakRanges: List<ClosedRange<LocalDate>>): Boolean {
-        val weekend = date.dayOfWeek == DayOfWeek.SATURDAY || date.dayOfWeek == DayOfWeek.SUNDAY
+    private fun isAutoHoliday(
+        date: LocalDate,
+        breakRanges: List<ClosedRange<LocalDate>>,
+        enableSaturdayClasses: Boolean
+    ): Boolean {
+        val nonLessonWeekend = date.dayOfWeek == DayOfWeek.SUNDAY ||
+            (date.dayOfWeek == DayOfWeek.SATURDAY && !enableSaturdayClasses)
         val longBreak = breakRanges.any { date in it }
-        return weekend || longBreak || JapaneseHolidayCalculator.isHoliday(date)
+        return nonLessonWeekend || longBreak || JapaneseHolidayCalculator.isHoliday(date)
     }
 
     internal fun clampFutureMetaTimestamp(value: Long, now: Long): Long {
@@ -1295,7 +1396,7 @@ class SchedulerRepository(
 
         suspend fun search(requireTeacherMatch: Boolean): Pair<LocalDate, LocalTime>? {
             for (date in fromDate.toDateRange(settings.termEnd)) {
-                if (date.dayOfWeek.value !in 1..5) continue
+                if (date.dayOfWeek == DayOfWeek.SUNDAY) continue
 
                 val dayTypeEntity = dao.getDayType(date)
                 val dayType = dayTypeEntity?.dayType ?: DayType.A
@@ -1347,7 +1448,7 @@ class SchedulerRepository(
         suspend fun search(requireTeacherMatch: Boolean): Pair<LocalDate, LocalTime>? {
             var date = fromDate
             while (date >= settings.termStart) {
-                if (date.dayOfWeek.value !in 1..5) {
+                if (date.dayOfWeek == DayOfWeek.SUNDAY) {
                     date = date.minusDays(1)
                     continue
                 }
@@ -1410,7 +1511,7 @@ class SchedulerRepository(
         suspend fun searchToday(requireTeacherMatch: Boolean): Pair<LocalDate, LocalTime>? {
             val dayTypeEntity = dao.getDayType(startDate)
             val dayType = dayTypeEntity?.dayType ?: DayType.A
-            if (startDate.dayOfWeek.value in 1..5 && dayType != DayType.HOLIDAY) {
+            if (startDate.dayOfWeek != DayOfWeek.SUNDAY && dayType != DayType.HOLIDAY) {
                 for (slot in slots) {
                     if (slot.start <= currentTime) continue
 
@@ -1435,7 +1536,7 @@ class SchedulerRepository(
 
         suspend fun searchAfterToday(requireTeacherMatch: Boolean): Pair<LocalDate, LocalTime>? {
             for (date in startDate.plusDays(1).toDateRange(settings.termEnd)) {
-                if (date.dayOfWeek.value !in 1..5) continue
+                if (date.dayOfWeek == DayOfWeek.SUNDAY) continue
 
                 val dayTypeEntity = dao.getDayType(date)
                 val dayType = dayTypeEntity?.dayType ?: DayType.A

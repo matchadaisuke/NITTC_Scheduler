@@ -85,6 +85,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import jp.linkserver.nittcsc.data.LessonNotificationExclusionEntity
 import jp.linkserver.nittcsc.data.LessonStartNotificationChipMode
+import jp.linkserver.nittcsc.data.LessonNotificationCustomization
 import jp.linkserver.nittcsc.data.LongBreakEntity
 import jp.linkserver.nittcsc.data.UiDesignMode
 import jp.linkserver.nittcsc.logic.AdvancedTimeValidation
@@ -156,6 +157,11 @@ fun SettingsScreen(
     onUpdateLessonStartNotificationChipMode: (LessonStartNotificationChipMode) -> Unit = {},
     onAddLessonNotificationExclusion: (String, String?, Boolean) -> Unit = { _, _, _ -> },
     onDeleteLessonNotificationExclusion: (LessonNotificationExclusionEntity) -> Unit = {},
+    onToggleSaturdayClasses: (Boolean) -> Unit = {},
+    onSaveSchedulePreset: (String) -> Unit = {},
+    onApplySchedulePreset: (String) -> Unit = {},
+    onDeleteSchedulePreset: (String) -> Unit = {},
+    onUpdateLessonNotificationCustomization: (LessonNotificationCustomization) -> Unit = {},
     tutorialFirstTimeCheckDisabledForTesting: Boolean = false,
     onToggleTutorialFirstTimeCheckDisabledForTesting: (Boolean) -> Unit = {},
     onUpdateScheduleSettings: (periodsPerDay: Int, periodDurationMin: Int, breakBetweenPeriodsMin: Int, lunchBreakMin: Int, lunchAfterPeriod: Int, startHour: Int, startMinute: Int, periodLabelStyle: PeriodLabelStyle, arrivalHour: Int, arrivalMinute: Int, departureHour: Int, departureMinute: Int) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _ -> },
@@ -1309,6 +1315,14 @@ fun SettingsScreen(
             }
         }
 
+        CustomizationScheduleSettingsContent(
+            settings = s,
+            onToggleSaturdayClasses = onToggleSaturdayClasses,
+            onSaveSchedulePreset = onSaveSchedulePreset,
+            onApplySchedulePreset = onApplySchedulePreset,
+            onDeleteSchedulePreset = onDeleteSchedulePreset
+        )
+
         // ── 通知設定 ──────────────────────────────────────────
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             AppSettingsCategory(title = stringResource(R.string.section_notification_settings))
@@ -1349,6 +1363,10 @@ fun SettingsScreen(
                 onMinutesBeforeChange = { lessonStartNotificationMinutesBefore = it },
                 onAddExclusion = onAddLessonNotificationExclusion,
                 onDeleteExclusion = onDeleteLessonNotificationExclusion
+            )
+            CustomizationNotificationSettingsContent(
+                settings = s,
+                onUpdate = onUpdateLessonNotificationCustomization
             )
         }
 
@@ -1619,6 +1637,20 @@ fun SettingsScreen(
                     }
                 }
 
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            AppSettingsCategory(title = stringResource(R.string.settings_sync_category))
+            CloudFileSyncSettingsContent()
+            AppSettingsGroup {
+                item("legacy_local_sync") {
+                    AppSettingsNavigationItem(
+                        title = stringResource(R.string.settings_legacy_local_sync_title),
+                        summary = stringResource(R.string.settings_legacy_local_sync_summary),
+                        onClick = onOpenLocalSync
+                    )
+                }
             }
         }
 

@@ -82,7 +82,10 @@ data class SettingsEntity(
     val examFirstPeriodStartHour: Int = 8,
     val examFirstPeriodStartMinute: Int = 50,
     val examArrivalHour: Int = 8,
-    val examArrivalMinute: Int = 30
+    val examArrivalMinute: Int = 30,
+    val enableSaturdayClasses: Boolean = false,
+    val schedulePresetsJson: String = "",
+    val lessonNotificationConfigJson: String = ""
 )
 
 @Entity(tableName = "day_types")

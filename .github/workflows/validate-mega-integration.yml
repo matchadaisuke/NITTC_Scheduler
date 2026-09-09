@@ -1,0 +1,37 @@
+name: Validate MEGA integration
+
+on:
+  push:
+    branches:
+      - feature/cloud-sync-schedule-presets-notifications
+    paths:
+      - app/libs/mega-sdk.aar
+      - app/build.gradle.kts
+      - app/proguard-rules.pro
+      - app/src/main/java/jp/linkserver/nittcsc/sync/CloudFileSyncManager.kt
+      - app/src/main/java/jp/linkserver/nittcsc/ui/CustomizationSettingsContent.kt
+      - .github/workflows/validate-mega-integration.yml
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Prepare Gradle wrapper
+        run: |
+          chmod +x gradlew
+          sed -i '/^org\.gradle\.java\.home=/d' gradle.properties
+      - name: Verify vendored SDK when present
+        run: |
+          if [ -f app/libs/mega-sdk.aar ]; then
+            unzip -l app/libs/mega-sdk.aar | grep 'classes.jar'
+            unzip -l app/libs/mega-sdk.aar | grep 'jni/arm64-v8a/libmega.so'
+          else
+            echo 'MEGA AAR not vendored yet; validating reflection-safe source build.'
+          fi
+      - name: Compile and test
+        run: ./gradlew :app:compileDebugKotlin :app:testDebugUnitTest

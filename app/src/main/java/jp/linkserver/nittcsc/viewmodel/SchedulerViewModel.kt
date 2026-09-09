@@ -640,6 +640,26 @@ class SchedulerViewModel(
         launchRepositoryUpdate { repository.updateLessonStartNotificationMinutesBefore(minutesBefore) }
     }
 
+    fun toggleSaturdayClasses(enabled: Boolean) {
+        launchRepositoryUpdate { repository.toggleSaturdayClasses(enabled) }
+    }
+
+    fun saveSchedulePreset(name: String) {
+        launchRepositoryUpdate { repository.saveSchedulePreset(name) }
+    }
+
+    fun applySchedulePreset(id: String) {
+        launchRepositoryUpdate { repository.applySchedulePreset(id) }
+    }
+
+    fun deleteSchedulePreset(id: String) {
+        launchRepositoryUpdate { repository.deleteSchedulePreset(id) }
+    }
+
+    fun updateLessonNotificationCustomization(config: jp.linkserver.nittcsc.data.LessonNotificationCustomization) {
+        launchRepositoryUpdate { repository.updateLessonNotificationCustomization(config) }
+    }
+
     fun toggleLessonStartNotificationLiveUpdates(enabled: Boolean) {
         launchRepositoryUpdate { repository.toggleLessonStartNotificationLiveUpdates(enabled) }
     }
@@ -777,7 +797,7 @@ class SchedulerViewModel(
         changedLessons: Map<Pair<LocalDate, Int>, ChangedLessonEntity> = emptyMap(),
         semesterTimetablesEnabled: Boolean = false
     ): ResolvedLesson? {
-        if (date.dayOfWeek.value !in 1..5) return null
+        if (date.dayOfWeek == DayOfWeek.SUNDAY) return null
         val dayTypeEntity = dayTypeEntities[date]
         val dayType = dayTypeEntity?.dayType ?: dayTypeMap[date] ?: defaultDayType(date)
         if (dayType == DayType.HOLIDAY) return null
@@ -802,7 +822,7 @@ class SchedulerViewModel(
         dayTypeEntities: Map<LocalDate, DayTypeEntity> = emptyMap(),
         semesterTimetablesEnabled: Boolean = false
     ): ResolvedLesson? {
-        if (date.dayOfWeek.value !in 1..5) return null
+        if (date.dayOfWeek == DayOfWeek.SUNDAY) return null
 
         val dayTypeEntity = dayTypeEntities[date]
         val dayType = dayTypeEntity?.dayType ?: dayTypeMap[date] ?: defaultDayType(date)
@@ -970,7 +990,7 @@ class SchedulerViewModel(
     }
 
     private fun defaultDayType(date: LocalDate): DayType {
-        val weekend = date.dayOfWeek.value >= DayOfWeek.SATURDAY.value
+        val weekend = date.dayOfWeek == DayOfWeek.SUNDAY
         return if (weekend || JapaneseHolidayCalculator.isHoliday(date)) DayType.HOLIDAY else DayType.A
     }
 
@@ -981,6 +1001,7 @@ class SchedulerViewModel(
             3 -> "水"
             4 -> "木"
             5 -> "金"
+            6 -> "土"
             else -> ""
         }
     }

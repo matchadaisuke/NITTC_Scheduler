@@ -32,7 +32,34 @@ val buildNumberFiles = (
 ).sortedBy { it.relativeTo(rootProject.projectDir).invariantSeparatorsPath }
 
 val appCodeName = "Sist" // トリッカルから取ります
-val appVersionName = "1.1.0-IntDev"
+val appVersionName = providers.gradleProperty("APP_VERSION_NAME")
+    .orElse(providers.environmentVariable("APP_VERSION_NAME"))
+    .orElse("1.1.0-IntDev")
+    .get()
+    .trim()
+    .also { require(it.isNotBlank()) { "APP_VERSION_NAME must not be blank" } }
+val appVersionCode = providers.gradleProperty("APP_VERSION_CODE")
+    .orElse(providers.environmentVariable("APP_VERSION_CODE"))
+    .orElse("18")
+    .get()
+    .toIntOrNull()
+    ?.also { require(it > 0) { "APP_VERSION_CODE must be greater than zero" } }
+    ?: error("APP_VERSION_CODE must be a positive integer")
+val megaAppKey = providers.gradleProperty("MEGA_APP_KEY")
+    .orElse(providers.environmentVariable("MEGA_APP_KEY"))
+    .orElse("")
+    .get()
+val megaAppKeyEscaped = megaAppKey.replace("\\", "\\\\").replace("\"", "\\\"")
+val releaseStoreFilePath = providers.environmentVariable("NITTC_RELEASE_STORE_FILE").orNull
+val releaseStorePassword = providers.environmentVariable("NITTC_RELEASE_STORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("NITTC_RELEASE_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("NITTC_RELEASE_KEY_PASSWORD").orNull
+val releaseSigningConfigured = listOf(
+    releaseStoreFilePath,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword
+).all { !it.isNullOrBlank() }
 val buildContentHash = MessageDigest.getInstance("SHA-256").run {
     buildNumberFiles.forEach { file ->
         update(file.relativeTo(rootProject.projectDir).invariantSeparatorsPath.toByteArray())
@@ -290,16 +317,28 @@ android {
         applicationId = "jp.linkserver.nittcsc"
         minSdk = 26
         targetSdk = 36
-        versionCode = 18
+        versionCode = appVersionCode
         versionName = appVersionName
         buildConfigField("String", "BUILD_NUMBER", "\"$generatedBuildNumber\"")
+        buildConfigField("String", "MEGA_APP_KEY", "\"$megaAppKeyEscaped\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(requireNotNull(releaseStoreFilePath))
+                storePassword = requireNotNull(releaseStorePassword)
+                keyAlias = requireNotNull(releaseKeyAlias)
+                keyPassword = requireNotNull(releaseKeyPassword)
+            }
+        }
+    }
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -333,6 +372,13 @@ kotlin {
 }
 
 dependencies {
+    val megaSdkAar = file("libs/mega-sdk.aar")
+    if (megaSdkAar.exists()) {
+        implementation(files(megaSdkAar))
+    }
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+    implementation("org.jetbrains:annotations:24.1.0")
+
     implementation("androidx.core:core-ktx:1.18.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.2")
@@ -362,6 +408,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20260814")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation(platform("androidx.compose:compose-bom:2026.06.00"))
