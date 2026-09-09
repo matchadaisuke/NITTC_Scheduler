@@ -82,9 +82,7 @@ MIT Licenseです
 
 Developer setup:
 
-1. MEGA SDK用のApplication Keyを作成します。
-2. `MEGA_APP_KEY=<key>` を `~/.gradle/gradle.properties` に設定するか、環境変数 `MEGA_APP_KEY` として設定します。
-3. 公式MEGA Android SDK AARを `app/libs/mega-sdk.aar` に配置します。このブランチのGitHub Actionsは、固定した公式MEGA SDKソースからAARを生成できます。
+公式MEGA Android SDK AARを `app/libs/mega-sdk.aar` に配置します。このリポジトリには、固定した公式MEGA SDK v10.19.0から生成したAARを同梱しています。v10.19.0では従来のコンストラクタ引数としてApp Keyが残っていますが、SDK内部では使用されないため、Application Keyの登録やビルド設定は不要です。
 
 MEGA SDKの実行はAndroid 9以降で有効にしています。NITTC Scheduler本体の既存minSdkは変更していません。
 
@@ -94,7 +92,6 @@ GitHub Actionsの `Build and release Android app` を手動実行すると、指
 
 初回実行前に、リポジトリのActions secretsへ次を登録してください。
 
-* `MEGA_APP_KEY`
 * `NITTC_RELEASE_KEYSTORE_BASE64`（リリース用JKSをBase64化した値）
 * `NITTC_RELEASE_STORE_PASSWORD`
 * `NITTC_RELEASE_KEY_ALIAS`

@@ -253,7 +253,6 @@ internal fun CloudFileSyncSettingsContent() {
     val sdkAvailable = remember {
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && CloudFileSyncManager.sdkAvailable()
     }
-    val appKeyConfigured = CloudFileSyncManager.appKeyConfigured()
     val notConfiguredText = stringResource(R.string.mega_sync_status_not_configured)
 
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -274,9 +273,6 @@ internal fun CloudFileSyncSettingsContent() {
                 }
                 !sdkAvailable -> {
                     Text(stringResource(R.string.mega_sync_sdk_missing))
-                }
-                !appKeyConfigured -> {
-                    Text(stringResource(R.string.mega_sync_app_key_missing))
                 }
                 !configured -> {
                     OutlinedTextField(

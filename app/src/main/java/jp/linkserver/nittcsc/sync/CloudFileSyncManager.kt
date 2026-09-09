@@ -8,7 +8,6 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
-import jp.linkserver.nittcsc.BuildConfig
 import jp.linkserver.nittcsc.data.AppDatabase
 import jp.linkserver.nittcsc.data.SchedulerRepository
 import jp.linkserver.nittcsc.data.UiDesignPreferences
@@ -103,8 +102,6 @@ object CloudFileSyncManager {
         true
     }.getOrDefault(false)
 
-    fun appKeyConfigured(): Boolean = BuildConfig.MEGA_APP_KEY.isNotBlank()
-
     fun lastStatus(context: Context): String =
         prefs(context).getString(KEY_LAST_STATUS, null)
             ?: if (isConfigured(context)) "MEGAに接続済み" else "未設定"
@@ -126,16 +123,13 @@ object CloudFileSyncManager {
         if (!sdkAvailable()) {
             return setStatus(appContext, "MEGA SDKがアプリに組み込まれていません")
         }
-        if (!appKeyConfigured()) {
-            return setStatus(appContext, "MEGA App Keyがビルドに設定されていません")
-        }
         val normalizedEmail = email.trim().lowercase()
         if (normalizedEmail.isBlank() || password.isBlank()) {
             return setStatus(appContext, "MEGAのメールアドレスとパスワードを入力してください")
         }
 
         return runtimeMutex.withLock {
-            val candidate = runCatching { MegaRuntime(appContext, BuildConfig.MEGA_APP_KEY) }
+            val candidate = runCatching { MegaRuntime(appContext) }
                 .getOrElse {
                     return@withLock setStatus(appContext, "MEGA SDKの初期化に失敗しました: ${it.userMessage()}")
                 }
@@ -168,7 +162,6 @@ object CloudFileSyncManager {
                 val message = when ((error as? MegaOperationException)?.code) {
                     -26 -> "2段階認証が有効です。認証コードを入力して再度ログインしてください"
                     -9 -> "MEGAのメールアドレスまたはパスワードが正しくありません"
-                    -22 -> "MEGA App Keyが無効です"
                     else -> "MEGAへのログインに失敗しました: ${error.userMessage()}"
                 }
                 setStatus(appContext, message)
@@ -289,14 +282,10 @@ object CloudFileSyncManager {
                 setStatus(context, "MEGA SDKがアプリに組み込まれていません")
                 return@withLock null
             }
-            if (!appKeyConfigured()) {
-                setStatus(context, "MEGA App Keyがビルドに設定されていません")
-                return@withLock null
-            }
             val session = prefs(context).getString(KEY_SESSION, null)?.takeIf { it.isNotBlank() }
                 ?: return@withLock null
             val created = runCatching {
-                MegaRuntime(context, BuildConfig.MEGA_APP_KEY).also { api ->
+                MegaRuntime(context).also { api ->
                     api.fastLogin(session)
                     api.fetchNodes()
                     api.observeNodeChanges {
@@ -411,8 +400,7 @@ object CloudFileSyncManager {
 }
 
 private class MegaRuntime(
-    private val context: Context,
-    appKey: String
+    private val context: Context
 ) {
     private val apiClass = Class.forName("nz.mega.sdk.MegaApiAndroid")
     private val requestListenerClass = Class.forName("nz.mega.sdk.MegaRequestListenerInterface")
@@ -425,7 +413,8 @@ private class MegaRuntime(
         val cache = File(context.filesDir, "mega-sdk-cache").apply { mkdirs() }
         api = apiClass
             .getConstructor(String::class.java, String::class.java, String::class.java)
-            .newInstance(appKey, "NITTC-Scheduler/MEGA-Sync", cache.absolutePath)
+            // MEGA SDK v10.19.0 keeps this legacy constructor argument but ignores it.
+            .newInstance("", "NITTC-Scheduler/MEGA-Sync", cache.absolutePath)
     }
 
     suspend fun login(email: String, password: String, pin: String?) {

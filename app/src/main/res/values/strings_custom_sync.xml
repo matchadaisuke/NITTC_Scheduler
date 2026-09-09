@@ -8,7 +8,6 @@
     <string name="mega_sync_description">MEGAアカウントへアプリ内でログインし、時間割・詳細時刻・設定・通知設定を自動同期します。ファイル選択やMEGAアプリは不要です。</string>
     <string name="mega_sync_android_version_unsupported">MEGA公式SDKの対応範囲に合わせ、MEGA同期はAndroid 9以降で利用できます。</string>
     <string name="mega_sync_sdk_missing">このビルドにはMEGA SDKが含まれていません。app/libs/mega-sdk.aar を組み込んだビルドが必要です。</string>
-    <string name="mega_sync_app_key_missing">このビルドにはMEGA App Keyが設定されていません。開発者側でMEGA_APP_KEYを設定してください。</string>
     <string name="mega_sync_email_label">MEGAメールアドレス</string>
     <string name="mega_sync_password_label">パスワード</string>
     <string name="mega_sync_mfa_label">2段階認証コード（必要な場合）</string>
