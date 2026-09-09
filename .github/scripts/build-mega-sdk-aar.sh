@@ -211,12 +211,27 @@ verify_aar() {
   unzip -q app/libs/mega-sdk.aar -d "$AAR_CHECK_DIR"
   [[ -s "$AAR_CHECK_DIR/classes.jar" ]] || fail "AAR has no classes.jar"
 
+  local generated_dir="$PWD/.mega-build-arm64-v8a/bindings/java/nz/mega/sdk"
+  local generated_other_dir="$PWD/.mega-build-x86_64/bindings/java/nz/mega/sdk"
+  local generated_names other_generated_names
+  generated_names="$(find "$generated_dir" -maxdepth 1 -type f -name '*JNI.java' -printf '%f\n' | sort)"
+  other_generated_names="$(find "$generated_other_dir" -maxdepth 1 -type f -name '*JNI.java' -printf '%f\n' | sort)"
+  [[ -n "$generated_names" ]] || fail "SWIG did not generate a JNI Java bridge"
+  [[ "$generated_names" == "$other_generated_names" ]] \
+    || fail "SWIG JNI Java bridge names differ between ABIs"
+
+  local -a required_classes=(
+    "nz/mega/sdk/MegaApiAndroid.class"
+    "nz/mega/sdk/MegaApi.class"
+  )
+  local generated_java
+  while IFS= read -r generated_java; do
+    [[ -n "$generated_java" ]] || continue
+    required_classes+=("nz/mega/sdk/${generated_java%.java}.class")
+  done <<< "$generated_names"
+
   local class
-  for class in \
-    nz/mega/sdk/MegaApiAndroid.class \
-    nz/mega/sdk/MegaApi.class \
-    nz/mega/sdk/MegaApiJNI.class
-  do
+  for class in "${required_classes[@]}"; do
     jar tf "$AAR_CHECK_DIR/classes.jar" \
       | awk -v expected="$class" '$0 == expected { found=1 } END { exit !found }' \
       || fail "Missing MEGA class in AAR: ${class}"
