@@ -48,7 +48,7 @@ build_abi() {
     -DANDROID_ABI="$abi" \
     -DANDROID_PLATFORM="$MEGA_ANDROID_API" \
     -DCMAKE_BUILD_TYPE=Release \
-    -DENABLE_CHAT=OFF \
+    -DENABLE_CHAT=ON \
     -DENABLE_SYNC=ON \
     -DENABLE_ISOLATED_GFX=OFF \
     -DENABLE_MEDIA_FILE_METADATA=OFF \
@@ -118,6 +118,9 @@ prepare_aar_project() {
   rm -rf "$AAR_PROJECT_DIR"
   mkdir -p "$AAR_PROJECT_DIR/sdk/src/main/java/nz/mega/sdk"
 
+  # MegaApiJava/MegaApiAndroid are the full public Android facade. Keep the native/SWIG
+  # feature set aligned with that facade (notably ENABLE_CHAT=ON), otherwise javac sees
+  # wrapper methods whose generated MegaApi counterparts do not exist.
   find "$SDK_SOURCE_DIR/bindings/java/nz/mega/sdk" -maxdepth 1 -type f \
     \( -name '*.java' -o -name '*.kt' \) -print0 \
     | xargs -0 -r -I{} cp "{}" "$AAR_PROJECT_DIR/sdk/src/main/java/nz/mega/sdk/"
