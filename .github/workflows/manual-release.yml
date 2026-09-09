@@ -6,10 +6,12 @@ on:
       version_name:
         description: Version name, for example 1.1.0
         required: true
+        default: 1.1.0-IntDev
         type: string
       version_code:
-        description: Positive Android version code, for example 18
+        description: Positive Android version code, for example 19
         required: true
+        default: '19'
         type: string
       release_notes:
         description: Optional release notes; generated notes are used when empty
