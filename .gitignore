@@ -41,3 +41,8 @@ classes.jar
 *.dm
 *.apk
 APK/
+
+# Release signing material
+*.jks
+*.keystore
+release-signing/

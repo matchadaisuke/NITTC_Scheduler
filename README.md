@@ -87,3 +87,17 @@ Developer setup:
 3. 公式MEGA Android SDK AARを `app/libs/mega-sdk.aar` に配置します。このブランチのGitHub Actionsは、固定した公式MEGA SDKソースからAARを生成できます。
 
 MEGA SDKの実行はAndroid 9以降で有効にしています。NITTC Scheduler本体の既存minSdkは変更していません。
+
+## Manual Android release
+
+GitHub Actionsの `Build and release Android app` を手動実行すると、指定したVersion Name / Version Codeでテスト、Lint、署名付きRelease APKのビルド、署名とバージョンの検証、GitHub Releaseへの公開を一度に実行します。
+
+初回実行前に、リポジトリのActions secretsへ次を登録してください。
+
+* `MEGA_APP_KEY`
+* `NITTC_RELEASE_KEYSTORE_BASE64`（リリース用JKSをBase64化した値）
+* `NITTC_RELEASE_STORE_PASSWORD`
+* `NITTC_RELEASE_KEY_ALIAS`
+* `NITTC_RELEASE_KEY_PASSWORD`
+
+同じVersion Nameのリリースタグが既に存在する場合や、必須secretが不足している場合は公開せずに失敗します。

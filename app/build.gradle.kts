@@ -32,12 +32,34 @@ val buildNumberFiles = (
 ).sortedBy { it.relativeTo(rootProject.projectDir).invariantSeparatorsPath }
 
 val appCodeName = "Sist" // トリッカルから取ります
-val appVersionName = "1.1.0-IntDev"
+val appVersionName = providers.gradleProperty("APP_VERSION_NAME")
+    .orElse(providers.environmentVariable("APP_VERSION_NAME"))
+    .orElse("1.1.0-IntDev")
+    .get()
+    .trim()
+    .also { require(it.isNotBlank()) { "APP_VERSION_NAME must not be blank" } }
+val appVersionCode = providers.gradleProperty("APP_VERSION_CODE")
+    .orElse(providers.environmentVariable("APP_VERSION_CODE"))
+    .orElse("18")
+    .get()
+    .toIntOrNull()
+    ?.also { require(it > 0) { "APP_VERSION_CODE must be greater than zero" } }
+    ?: error("APP_VERSION_CODE must be a positive integer")
 val megaAppKey = providers.gradleProperty("MEGA_APP_KEY")
     .orElse(providers.environmentVariable("MEGA_APP_KEY"))
     .orElse("")
     .get()
 val megaAppKeyEscaped = megaAppKey.replace("\\", "\\\\").replace("\"", "\\\"")
+val releaseStoreFilePath = providers.environmentVariable("NITTC_RELEASE_STORE_FILE").orNull
+val releaseStorePassword = providers.environmentVariable("NITTC_RELEASE_STORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("NITTC_RELEASE_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("NITTC_RELEASE_KEY_PASSWORD").orNull
+val releaseSigningConfigured = listOf(
+    releaseStoreFilePath,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword
+).all { !it.isNullOrBlank() }
 val buildContentHash = MessageDigest.getInstance("SHA-256").run {
     buildNumberFiles.forEach { file ->
         update(file.relativeTo(rootProject.projectDir).invariantSeparatorsPath.toByteArray())
@@ -295,7 +317,7 @@ android {
         applicationId = "jp.linkserver.nittcsc"
         minSdk = 26
         targetSdk = 36
-        versionCode = 18
+        versionCode = appVersionCode
         versionName = appVersionName
         buildConfigField("String", "BUILD_NUMBER", "\"$generatedBuildNumber\"")
         buildConfigField("String", "MEGA_APP_KEY", "\"$megaAppKeyEscaped\"")
@@ -304,8 +326,19 @@ android {
         vectorDrawables.useSupportLibrary = true
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(requireNotNull(releaseStoreFilePath))
+                storePassword = requireNotNull(releaseStorePassword)
+                keyAlias = requireNotNull(releaseKeyAlias)
+                keyPassword = requireNotNull(releaseKeyPassword)
+            }
+        }
+    }
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
