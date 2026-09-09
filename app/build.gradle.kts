@@ -45,11 +45,6 @@ val appVersionCode = providers.gradleProperty("APP_VERSION_CODE")
     .toIntOrNull()
     ?.also { require(it > 0) { "APP_VERSION_CODE must be greater than zero" } }
     ?: error("APP_VERSION_CODE must be a positive integer")
-val megaAppKey = providers.gradleProperty("MEGA_APP_KEY")
-    .orElse(providers.environmentVariable("MEGA_APP_KEY"))
-    .orElse("")
-    .get()
-val megaAppKeyEscaped = megaAppKey.replace("\\", "\\\\").replace("\"", "\\\"")
 val releaseStoreFilePath = providers.environmentVariable("NITTC_RELEASE_STORE_FILE").orNull
 val releaseStorePassword = providers.environmentVariable("NITTC_RELEASE_STORE_PASSWORD").orNull
 val releaseKeyAlias = providers.environmentVariable("NITTC_RELEASE_KEY_ALIAS").orNull
@@ -320,7 +315,6 @@ android {
         versionCode = appVersionCode
         versionName = appVersionName
         buildConfigField("String", "BUILD_NUMBER", "\"$generatedBuildNumber\"")
-        buildConfigField("String", "MEGA_APP_KEY", "\"$megaAppKeyEscaped\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true

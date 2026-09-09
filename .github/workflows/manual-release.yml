@@ -37,7 +37,6 @@ jobs:
     env:
       VERSION_NAME: ${{ inputs.version_name }}
       VERSION_CODE: ${{ inputs.version_code }}
-      MEGA_APP_KEY: ${{ secrets.MEGA_APP_KEY }}
       KEYSTORE_BASE64: ${{ secrets.NITTC_RELEASE_KEYSTORE_BASE64 }}
       NITTC_RELEASE_STORE_PASSWORD: ${{ secrets.NITTC_RELEASE_STORE_PASSWORD }}
       NITTC_RELEASE_KEY_ALIAS: ${{ secrets.NITTC_RELEASE_KEY_ALIAS }}
@@ -66,7 +65,7 @@ jobs:
             echo "::error::version_code must be a positive integer"
             exit 1
           }
-          for name in MEGA_APP_KEY KEYSTORE_BASE64 NITTC_RELEASE_STORE_PASSWORD NITTC_RELEASE_KEY_ALIAS NITTC_RELEASE_KEY_PASSWORD; do
+          for name in KEYSTORE_BASE64 NITTC_RELEASE_STORE_PASSWORD NITTC_RELEASE_KEY_ALIAS NITTC_RELEASE_KEY_PASSWORD; do
             [[ -n "${!name:-}" ]] || {
               echo "::error::Required GitHub Actions secret is missing: $name"
               exit 1
