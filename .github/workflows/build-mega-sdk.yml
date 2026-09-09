@@ -1,6 +1,7 @@
 name: Build vendored MEGA SDK
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - feature/cloud-sync-schedule-presets-notifications
@@ -9,6 +10,15 @@ on:
 
 permissions:
   contents: write
+
+concurrency:
+  group: build-mega-sdk-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  MEGA_SDK_TAG: v10.19.0
+  ANDROID_NDK_VERSION: 27.1.12297006
+  MEGA_ANDROID_API: '28'
 
 jobs:
   build-mega-sdk:
@@ -23,37 +33,58 @@ jobs:
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
+          # MEGA v10.19.0's official Android sample uses JDK 21. The AAR is
+          # still compiled to JVM 17 bytecode to match NITTC Scheduler.
+          java-version: '21'
 
       - name: Cache vcpkg binary archives
         uses: actions/cache@v4
         with:
           path: ~/.cache/vcpkg/archives
-          key: mega-vcpkg-${{ runner.os }}-v10.19.0-ndk27.1
+          key: mega-vcpkg-${{ runner.os }}-${{ env.MEGA_SDK_TAG }}-ndk-${{ env.ANDROID_NDK_VERSION }}
 
       - name: Install native build prerequisites
+        shell: bash
         run: |
+          set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y swig ninja-build pkg-config build-essential autoconf automake autoconf-archive make
-          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;27.1.12297006"
+          sudo apt-get install -y \
+            autoconf \
+            automake \
+            autoconf-archive \
+            binutils \
+            build-essential \
+            make \
+            ninja-build \
+            pkg-config \
+            swig \
+            unzip
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "ndk;${ANDROID_NDK_VERSION}"
 
       - name: Checkout official MEGA SDK and vcpkg
+        shell: bash
         run: |
-          git clone --depth 1 --branch v10.19.0 https://github.com/meganz/sdk.git .mega-sdk-src
-          # MEGA's vcpkg manifest pins a baseline commit, so the versions history must be available.
+          set -euo pipefail
+          git clone --depth 1 --branch "${MEGA_SDK_TAG}" \
+            https://github.com/meganz/sdk.git .mega-sdk-src
+          # MEGA's vcpkg manifest pins a baseline commit, so keep the versions
+          # history available instead of using a shallow vcpkg checkout.
           git clone https://github.com/microsoft/vcpkg.git .mega-vcpkg
           ./.mega-vcpkg/bootstrap-vcpkg.sh -disableMetrics
 
       - name: Build MEGA JNI and Java bindings
+        shell: bash
         run: |
           set -euxo pipefail
-          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.1.12297006"
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}"
+
           for ABI in arm64-v8a x86_64; do
             cmake -S .mega-sdk-src --preset mega-android \
               -B ".mega-build-${ABI}" \
               -DVCPKG_ROOT="$PWD/.mega-vcpkg" \
               -DANDROID_ABI="${ABI}" \
-              -DANDROID_PLATFORM=28 \
+              -DANDROID_PLATFORM="${MEGA_ANDROID_API}" \
               -DCMAKE_BUILD_TYPE=Release \
               -DENABLE_CHAT=OFF \
               -DENABLE_SYNC=ON \
@@ -66,24 +97,99 @@ jobs:
               -DUSE_FFMPEG=OFF \
               -DENABLE_JAVA_BINDINGS=ON \
               -DENABLE_SDKLIB_ANDROID_DYNAMIC_LIBRARY=ON
+
             cmake --build ".mega-build-${ABI}" --target SDKJavaBindings -j2
-            test -f ".mega-build-${ABI}/bindings/java/libmega.so"
+            test -s ".mega-build-${ABI}/bindings/java/libmega.so"
+            test -d ".mega-build-${ABI}/bindings/java/nz/mega/sdk"
           done
 
       - name: Package Android AAR
+        shell: bash
         run: |
           set -euxo pipefail
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}"
+
+          rm -rf .mega-aar
           mkdir -p .mega-aar/sdk/src/main/java/nz/mega/sdk
           mkdir -p .mega-aar/sdk/src/main/jniLibs/arm64-v8a
           mkdir -p .mega-aar/sdk/src/main/jniLibs/x86_64
 
-          cp .mega-sdk-src/bindings/java/nz/mega/sdk/*.java .mega-aar/sdk/src/main/java/nz/mega/sdk/
-          cp .mega-sdk-src/bindings/java/nz/mega/sdk/*.kt .mega-aar/sdk/src/main/java/nz/mega/sdk/
-          cp .mega-build-arm64-v8a/bindings/java/nz/mega/sdk/*.java .mega-aar/sdk/src/main/java/nz/mega/sdk/
+          # Start with MEGA's checked-in Android wrappers, then overlay the SWIG
+          # generated classes from the exact native build used for the AAR.
+          find .mega-sdk-src/bindings/java/nz/mega/sdk -maxdepth 1 -type f \
+            \( -name '*.java' -o -name '*.kt' \) -print0 \
+            | xargs -0 -r -I{} cp "{}" .mega-aar/sdk/src/main/java/nz/mega/sdk/
+          find .mega-build-arm64-v8a/bindings/java/nz/mega/sdk -maxdepth 1 -type f \
+            -name '*.java' -print0 \
+            | xargs -0 -r -I{} cp "{}" .mega-aar/sdk/src/main/java/nz/mega/sdk/
           rm -f .mega-aar/sdk/src/main/java/nz/mega/sdk/MegaApiSwing.java
 
-          cp .mega-build-arm64-v8a/bindings/java/libmega.so .mega-aar/sdk/src/main/jniLibs/arm64-v8a/libmega.so
-          cp .mega-build-x86_64/bindings/java/libmega.so .mega-aar/sdk/src/main/jniLibs/x86_64/libmega.so
+          is_android_system_lib() {
+            case "$1" in
+              libc.so|libdl.so|liblog.so|libm.so|libz.so|libandroid.so|\
+              libatomic.so|libEGL.so|libGLESv2.so|libGLESv3.so|libjnigraphics.so|\
+              libmediandk.so|libOpenSLES.so|libstdc++.so|libvulkan.so)
+                return 0
+                ;;
+              *)
+                return 1
+                ;;
+            esac
+          }
+
+          collect_native_closure() {
+            local ABI="$1"
+            local TRIPLE="$2"
+            local BUILD_DIR=".mega-build-${ABI}"
+            local DEST=".mega-aar/sdk/src/main/jniLibs/${ABI}"
+            local ROOT_LIB="${BUILD_DIR}/bindings/java/libmega.so"
+
+            install -m 0644 "$ROOT_LIB" "$DEST/libmega.so"
+
+            local -a QUEUE=("$DEST/libmega.so")
+            local INDEX=0
+            while (( INDEX < ${#QUEUE[@]} )); do
+              local LIB="${QUEUE[$INDEX]}"
+              INDEX=$((INDEX + 1))
+
+              while IFS= read -r NEEDED; do
+                [[ -n "$NEEDED" ]] || continue
+                if is_android_system_lib "$NEEDED"; then
+                  continue
+                fi
+                if [[ -s "$DEST/$NEEDED" ]]; then
+                  continue
+                fi
+
+                local SOURCE=""
+                SOURCE="$(find "$BUILD_DIR" -type f -name "$NEEDED" -print -quit)"
+                if [[ -z "$SOURCE" ]]; then
+                  SOURCE="$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" \
+                    -type f -path "*/sysroot/usr/lib/${TRIPLE}/${NEEDED}" \
+                    -print -quit)"
+                fi
+                if [[ -z "$SOURCE" ]]; then
+                  SOURCE="$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" \
+                    -type f -path "*/sysroot/usr/lib/${TRIPLE}/*/${NEEDED}" \
+                    -print -quit)"
+                fi
+
+                if [[ -z "$SOURCE" ]]; then
+                  echo "::error::Unable to resolve ${NEEDED}, required by ${LIB} for ${ABI}"
+                  exit 1
+                fi
+
+                cp -L "$SOURCE" "$DEST/$NEEDED"
+                QUEUE+=("$DEST/$NEEDED")
+              done < <(
+                readelf -d "$LIB" \
+                  | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p'
+              )
+            done
+          }
+
+          collect_native_closure arm64-v8a aarch64-linux-android
+          collect_native_closure x86_64 x86_64-linux-android
 
           cat > .mega-aar/settings.gradle.kts <<'EOF'
           pluginManagement {
@@ -120,9 +226,12 @@ jobs:
           android {
               namespace = "nz.mega.sdk"
               compileSdk = 36
-              // Keep the containing app's minSdk at 26. The MEGA native library itself is
-              // built for API 28 and NITTC Scheduler never loads it below Android 9.
-              defaultConfig { minSdk = 26 }
+              // Keep NITTC Scheduler installable on API 26/27. The native MEGA
+              // binary is built for API 28 and is never loaded below Android 9.
+              defaultConfig {
+                  minSdk = 26
+                  consumerProguardFiles("consumer-rules.pro")
+              }
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
                   targetCompatibility = JavaVersion.VERSION_17
@@ -136,8 +245,18 @@ jobs:
           }
 
           dependencies {
+              implementation("androidx.appcompat:appcompat:1.7.0")
               implementation("androidx.exifinterface:exifinterface:1.3.7")
               implementation("org.jetbrains:annotations:24.1.0")
+          }
+          EOF
+
+          cat > .mega-aar/sdk/consumer-rules.pro <<'EOF'
+          # NITTC Scheduler intentionally loads MEGA through reflection so source
+          # builds can still compile before the vendored AAR exists.
+          -keep class nz.mega.sdk.** { *; }
+          -keepclasseswithmembernames,includedescriptorclasses class * {
+              native <methods>;
           }
           EOF
 
@@ -148,15 +267,109 @@ jobs:
 
           chmod +x gradlew
           sed -i '/^org\.gradle\.java\.home=/d' gradle.properties
-          ./gradlew -p .mega-aar :sdk:assembleRelease
+          ./gradlew -p .mega-aar :sdk:assembleRelease --stacktrace
 
           mkdir -p app/libs third_party
           cp .mega-aar/sdk/build/outputs/aar/sdk-release.aar app/libs/mega-sdk.aar
           cp .mega-sdk-src/LICENSE third_party/mega-sdk-LICENSE.txt
-          unzip -l app/libs/mega-sdk.aar | grep -E 'classes.jar|jni/arm64-v8a/libmega.so|jni/x86_64/libmega.so'
+
+      - name: Verify MEGA AAR structure and JNI linkage
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s app/libs/mega-sdk.aar
+
+          rm -rf .mega-aar-check
+          mkdir -p .mega-aar-check
+          unzip -q app/libs/mega-sdk.aar -d .mega-aar-check
+          test -s .mega-aar-check/classes.jar
+
+          for CLASS in \
+            nz/mega/sdk/MegaApiAndroid.class \
+            nz/mega/sdk/MegaApi.class \
+            nz/mega/sdk/MegaApiJNI.class
+          do
+            if ! jar tf .mega-aar-check/classes.jar | grep -Fx "$CLASS" >/dev/null; then
+              echo "::error::Missing MEGA class in AAR: ${CLASS}"
+              exit 1
+            fi
+          done
+
+          is_android_system_lib() {
+            case "$1" in
+              libc.so|libdl.so|liblog.so|libm.so|libz.so|libandroid.so|\
+              libatomic.so|libEGL.so|libGLESv2.so|libGLESv3.so|libjnigraphics.so|\
+              libmediandk.so|libOpenSLES.so|libstdc++.so|libvulkan.so)
+                return 0
+                ;;
+              *)
+                return 1
+                ;;
+            esac
+          }
+
+          for ABI in arm64-v8a x86_64; do
+            LIB_DIR=".mega-aar-check/jni/${ABI}"
+            ROOT_LIB="${LIB_DIR}/libmega.so"
+            test -s "$ROOT_LIB" || {
+              echo "::error::Missing native MEGA library for ${ABI}"
+              exit 1
+            }
+
+            # The Java binding must actually contain JNI entry points. This
+            # prevents accidentally packaging the core C++ library instead.
+            if ! readelf -Ws "$ROOT_LIB" \
+              | awk '/Java_nz_mega_sdk_|JNI_OnLoad/ { found=1 } END { exit !found }'; then
+              echo "::error::${ROOT_LIB} contains no MEGA JNI entry points"
+              exit 1
+            fi
+
+            while IFS= read -r LIB; do
+              while IFS= read -r NEEDED; do
+                [[ -n "$NEEDED" ]] || continue
+                if is_android_system_lib "$NEEDED"; then
+                  continue
+                fi
+                if [[ ! -s "${LIB_DIR}/${NEEDED}" ]]; then
+                  echo "::error::${LIB} requires missing native dependency ${NEEDED}"
+                  exit 1
+                fi
+              done < <(
+                readelf -d "$LIB" \
+                  | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p'
+              )
+            done < <(find "$LIB_DIR" -maxdepth 1 -type f -name '*.so' -print)
+          done
+
+          if ! unzip -l app/libs/mega-sdk.aar | grep -F 'consumer-rules.pro' >/dev/null; then
+            echo "::warning::Consumer ProGuard rules are stored by AGP under a transformed path; release build verification will confirm reflection safety"
+          fi
+
+      - name: Validate application with vendored MEGA SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          # Debug catches compile/package integration. Release additionally runs
+          # R8, which is essential because MEGA is intentionally accessed via reflection.
+          ./gradlew :app:assembleDebug :app:assembleRelease --stacktrace
+
+      - name: Verify Android 8 compatibility policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The application remains installable on API 26/27, but native MEGA
+          # code built for API 28 must never be initialized there.
+          grep -Fq 'minSdk = 26' app/build.gradle.kts
+          grep -Fq 'Build.VERSION.SDK_INT < Build.VERSION_CODES.P' \
+            app/src/main/java/jp/linkserver/nittcsc/sync/CloudFileSyncManager.kt
+          grep -Fq 'MEGA同期はAndroid 9以降で利用できます' \
+            app/src/main/java/jp/linkserver/nittcsc/sync/CloudFileSyncManager.kt
 
       - name: Commit vendored SDK
+        shell: bash
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -f app/libs/mega-sdk.aar third_party/mega-sdk-LICENSE.txt
@@ -164,7 +377,8 @@ jobs:
             echo "Vendored SDK already up to date"
             exit 0
           fi
-          git commit -m "build: vendor MEGA SDK v10.19.0 Android AAR"
+
+          git commit -m "build: vendor MEGA SDK ${MEGA_SDK_TAG} Android AAR"
           git restore gradlew gradle.properties
           git pull --rebase origin feature/cloud-sync-schedule-presets-notifications
           git push origin HEAD:feature/cloud-sync-schedule-presets-notifications
