@@ -195,9 +195,13 @@ EOF
 
 build_aar() {
   chmod +x ./gradlew
-  # A developer-specific java.home must not override CI's JDK.
-  sed -i '/^org\.gradle\.java\.home=/d' gradle.properties
-  ./gradlew -p "$AAR_PROJECT_DIR" :sdk:assembleRelease --stacktrace
+  # Keep CI's selected JDK local to this Gradle invocation; never rewrite repository files.
+  local java_home="${JAVA_HOME:?JAVA_HOME is required}"
+  ./gradlew \
+    -Dorg.gradle.java.home="$java_home" \
+    -p "$AAR_PROJECT_DIR" \
+    :sdk:assembleRelease \
+    --stacktrace
 
   mkdir -p app/libs third_party
   cp "$AAR_PROJECT_DIR/sdk/build/outputs/aar/sdk-release.aar" app/libs/mega-sdk.aar
