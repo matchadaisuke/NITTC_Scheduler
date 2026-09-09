@@ -1641,7 +1641,7 @@ fun SettingsScreen(
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            AppSettingsCategory(title = "同期")
+            AppSettingsCategory(title = stringResource(R.string.settings_sync_category))
             CloudFileSyncSettingsContent()
             AppSettingsGroup {
                 item("legacy_local_sync") {

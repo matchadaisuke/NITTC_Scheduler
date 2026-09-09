@@ -4,4 +4,21 @@
     <string name="cd_open_mega_sync">MEGA同期を開く</string>
     <string name="settings_legacy_local_sync_title">旧・端末間同期</string>
     <string name="settings_legacy_local_sync_summary">本家のWi-Fi / Nearby / 信頼済み端末による同期を利用します。</string>
+    <string name="settings_sync_category">同期</string>
+    <string name="mega_sync_description">MEGAアカウントへアプリ内でログインし、時間割・詳細時刻・設定・通知設定を自動同期します。ファイル選択やMEGAアプリは不要です。</string>
+    <string name="mega_sync_android_version_unsupported">MEGA公式SDKの対応範囲に合わせ、MEGA同期はAndroid 9以降で利用できます。</string>
+    <string name="mega_sync_sdk_missing">このビルドにはMEGA SDKが含まれていません。app/libs/mega-sdk.aar を組み込んだビルドが必要です。</string>
+    <string name="mega_sync_app_key_missing">このビルドにはMEGA App Keyが設定されていません。開発者側でMEGA_APP_KEYを設定してください。</string>
+    <string name="mega_sync_email_label">MEGAメールアドレス</string>
+    <string name="mega_sync_password_label">パスワード</string>
+    <string name="mega_sync_mfa_label">2段階認証コード（必要な場合）</string>
+    <string name="mega_sync_connecting">接続中…</string>
+    <string name="mega_sync_login_button">MEGAにログインして同期</string>
+    <string name="mega_sync_session_description">パスワードは保存しません。ログイン成功後はMEGAのセッションキーを端末に保持し、次回から自動接続します。</string>
+    <string name="mega_sync_connected_account">接続中: %1$s</string>
+    <string name="mega_sync_syncing">同期中…</string>
+    <string name="mega_sync_now_button">今すぐ同期</string>
+    <string name="mega_sync_disconnect_button">ログアウト / 解除</string>
+    <string name="mega_sync_runtime_description">MEGA上の「NITTC Scheduler/scheduler-sync.json」を自動管理します。アプリ実行中はローカルDBとMEGAの変更イベントで同期し、バックグラウンドはWorkManagerで取りこぼしを補完します。</string>
+    <string name="mega_sync_status_not_configured">未設定</string>
 </resources>

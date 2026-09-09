@@ -15,7 +15,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import jp.linkserver.nittcsc.R
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -23,12 +25,12 @@ internal fun MegaSyncScreen(onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("MEGA同期") },
+                title = { Text(stringResource(R.string.sync_title_mega_sync)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "戻る"
+                            contentDescription = stringResource(R.string.cd_back)
                         )
                     }
                 }

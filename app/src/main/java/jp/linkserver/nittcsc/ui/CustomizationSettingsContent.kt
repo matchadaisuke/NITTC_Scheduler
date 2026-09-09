@@ -24,8 +24,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import jp.linkserver.nittcsc.R
 import jp.linkserver.nittcsc.data.LessonNotificationCustomization
 import jp.linkserver.nittcsc.data.LessonNotificationTrigger
 import jp.linkserver.nittcsc.data.SettingsEntity
@@ -252,35 +254,36 @@ internal fun CloudFileSyncSettingsContent() {
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && CloudFileSyncManager.sdkAvailable()
     }
     val appKeyConfigured = CloudFileSyncManager.appKeyConfigured()
+    val notConfiguredText = stringResource(R.string.mega_sync_status_not_configured)
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("MEGA同期", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.sync_title_mega_sync), style = MaterialTheme.typography.titleMedium)
             Text(
-                "MEGAアカウントへアプリ内でログインし、時間割・詳細時刻・設定・通知設定を自動同期します。ファイル選択やMEGAアプリは不要です。",
+                stringResource(R.string.mega_sync_description),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             when {
                 Build.VERSION.SDK_INT < Build.VERSION_CODES.P -> {
-                    Text("MEGA公式SDKの対応範囲に合わせ、MEGA同期はAndroid 9以降で利用できます。")
+                    Text(stringResource(R.string.mega_sync_android_version_unsupported))
                 }
                 !sdkAvailable -> {
-                    Text("このビルドにはMEGA SDKが含まれていません。app/libs/mega-sdk.aar を組み込んだビルドが必要です。")
+                    Text(stringResource(R.string.mega_sync_sdk_missing))
                 }
                 !appKeyConfigured -> {
-                    Text("このビルドにはMEGA App Keyが設定されていません。開発者側でMEGA_APP_KEYを設定してください。")
+                    Text(stringResource(R.string.mega_sync_app_key_missing))
                 }
                 !configured -> {
                     OutlinedTextField(
                         value = email,
                         onValueChange = { email = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("MEGAメールアドレス") },
+                        label = { Text(stringResource(R.string.mega_sync_email_label)) },
                         singleLine = true,
                         enabled = !busy
                     )
@@ -288,7 +291,7 @@ internal fun CloudFileSyncSettingsContent() {
                         value = password,
                         onValueChange = { password = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("パスワード") },
+                        label = { Text(stringResource(R.string.mega_sync_password_label)) },
                         singleLine = true,
                         enabled = !busy,
                         visualTransformation = PasswordVisualTransformation()
@@ -297,7 +300,7 @@ internal fun CloudFileSyncSettingsContent() {
                         value = pin,
                         onValueChange = { pin = it.filter(Char::isDigit).take(8) },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("2段階認証コード（必要な場合）") },
+                        label = { Text(stringResource(R.string.mega_sync_mfa_label)) },
                         singleLine = true,
                         enabled = !busy
                     )
@@ -322,16 +325,26 @@ internal fun CloudFileSyncSettingsContent() {
                         },
                         enabled = !busy && email.isNotBlank() && password.isNotBlank()
                     ) {
-                        Text(if (busy) "接続中…" else "MEGAにログインして同期")
+                        Text(
+                            stringResource(
+                                if (busy) R.string.mega_sync_connecting
+                                else R.string.mega_sync_login_button
+                            )
+                        )
                     }
                     Text(
-                        "パスワードは保存しません。ログイン成功後はMEGAのセッションキーを端末に保持し、次回から自動接続します。",
+                        stringResource(R.string.mega_sync_session_description),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 else -> {
-                    Text("接続中: ${CloudFileSyncManager.linkedEmail(context).orEmpty()}")
+                    Text(
+                        stringResource(
+                            R.string.mega_sync_connected_account,
+                            CloudFileSyncManager.linkedEmail(context).orEmpty()
+                        )
+                    )
                     Text(status, style = MaterialTheme.typography.bodyMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
@@ -344,21 +357,26 @@ internal fun CloudFileSyncSettingsContent() {
                             },
                             enabled = !busy
                         ) {
-                            Text(if (busy) "同期中…" else "今すぐ同期")
+                            Text(
+                                stringResource(
+                                    if (busy) R.string.mega_sync_syncing
+                                    else R.string.mega_sync_now_button
+                                )
+                            )
                         }
                         TextButton(
                             onClick = {
                                 CloudFileSyncManager.disconnect(context)
                                 configured = false
-                                status = "未設定"
+                                status = notConfiguredText
                             },
                             enabled = !busy
                         ) {
-                            Text("ログアウト / 解除")
+                            Text(stringResource(R.string.mega_sync_disconnect_button))
                         }
                     }
                     Text(
-                        "MEGA上の「NITTC Scheduler/scheduler-sync.json」を自動管理します。アプリ実行中はローカルDBとMEGAの変更イベントで同期し、バックグラウンドはWorkManagerで取りこぼしを補完します。",
+                        stringResource(R.string.mega_sync_runtime_description),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
