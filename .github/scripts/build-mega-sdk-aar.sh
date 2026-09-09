@@ -144,14 +144,12 @@ EOF
   cat > "$AAR_PROJECT_DIR/build.gradle.kts" <<'EOF'
 plugins {
     id("com.android.library") version "9.1.1" apply false
-    id("org.jetbrains.kotlin.android") version "2.3.10" apply false
 }
 EOF
 
   cat > "$AAR_PROJECT_DIR/sdk/build.gradle.kts" <<'EOF'
 plugins {
     id("com.android.library")
-    id("org.jetbrains.kotlin.android")
 }
 android {
     namespace = "nz.mega.sdk"
