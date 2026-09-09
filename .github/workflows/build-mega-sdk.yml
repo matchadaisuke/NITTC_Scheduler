@@ -97,6 +97,14 @@ jobs:
             exit 0
           fi
           git commit -m "build: vendor MEGA SDK ${MEGA_SDK_TAG} Android AAR"
-          git restore gradlew gradle.properties
-          git pull --rebase origin feature/cloud-sync-schedule-presets-notifications
-          git push origin HEAD:feature/cloud-sync-schedule-presets-notifications
+
+          # The native/Gradle build may touch tracked workspace files. The vendored
+          # artifacts are already committed above, so reset every remaining tracked
+          # change before rebasing. This prevents an unrelated dirty worktree from
+          # making `git pull --rebase` fail while preserving the artifact commit.
+          git status --short
+          git reset --hard HEAD
+          git status --short
+
+          git pull --rebase origin "$GITHUB_REF_NAME"
+          git push origin HEAD:"$GITHUB_REF_NAME"
