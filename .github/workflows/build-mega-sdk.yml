@@ -73,7 +73,9 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x gradlew
-          ./gradlew :app:assembleDebug :app:assembleRelease --stacktrace
+          # Override the developer-specific JDK in gradle.properties here too.
+          ./gradlew -Dorg.gradle.java.home="$JAVA_HOME" \
+            :app:assembleDebug :app:assembleRelease --stacktrace
 
       - name: Verify Android 8 compatibility policy
         shell: bash
