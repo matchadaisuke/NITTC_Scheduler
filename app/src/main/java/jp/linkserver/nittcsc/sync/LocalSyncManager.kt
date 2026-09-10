@@ -16,6 +16,7 @@ import jp.linkserver.nittcsc.data.SyncProfileEntity
 import jp.linkserver.nittcsc.data.SyncRegisteredDeviceEntity
 import jp.linkserver.nittcsc.data.SyncTrustedPeerEntity
 import jp.linkserver.nittcsc.data.requireCurrentSyncProtocol
+import jp.linkserver.nittcsc.reminder.NotificationRebuildCoordinator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -658,6 +659,7 @@ class LocalSyncManager(
             )
         }
         repository.applySyncPayload(merged)
+        NotificationRebuildCoordinator.rebuild(appContext, "local_sync_merge")
         val storedDevice = dao.getSyncRegisteredDevice(session.target.deviceId)
         val expectedFingerprint = storedDevice
             ?.serverCertFingerprint?.takeIf { it.isNotBlank() }
@@ -1053,6 +1055,7 @@ class LocalSyncManager(
                         JSONObject().put("ok", false).put("message", auth.failureMessage ?: authFailureMessage(request))
                     } else {
                         repository.applySyncPayload(request.getJSONObject("payload"))
+                        NotificationRebuildCoordinator.rebuild(appContext, "local_sync_receive")
                         val peerName = if (request.optString("authMode") == "trust") {
                             val peer = dao.getSyncTrustedPeerByToken(request.optString("authValue"))
                             peer?.peerDeviceName?.takeIf { it.isNotBlank() }

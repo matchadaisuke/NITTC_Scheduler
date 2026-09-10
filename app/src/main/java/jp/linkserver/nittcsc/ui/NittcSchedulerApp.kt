@@ -221,7 +221,7 @@ import jp.linkserver.nittcsc.logic.usesNoLessonAppearance
 import jp.linkserver.nittcsc.ml.ModelDownloadManager
 import jp.linkserver.nittcsc.ml.VlmInferenceEngine
 import jp.linkserver.nittcsc.ml.VlmInferenceService
-import jp.linkserver.nittcsc.reminder.LessonStartNotificationWorker
+import jp.linkserver.nittcsc.reminder.NotificationRebuildCoordinator
 import jp.linkserver.nittcsc.reminder.PlanReminderWorker
 import jp.linkserver.nittcsc.reminder.TaskReminderWorker
 import jp.linkserver.nittcsc.ui.components.AppBottomNavigation
@@ -839,11 +839,13 @@ private fun NittcSchedulerContent(viewModel: SchedulerViewModel, startOnTimetabl
         uiState.changedLessons,
         uiState.cancelledLessons,
         uiState.examDaySchedules,
-        uiState.examLessons
+        uiState.examLessons,
+        uiState.tasks,
+        uiState.plans
     ) {
         if (uiState.initialized) {
             delay(300)
-            LessonStartNotificationWorker.rescheduleAll(context)
+            NotificationRebuildCoordinator.rebuild(context, "schedule_data_changed")
             jp.linkserver.nittcsc.widget.WidgetUpdater.updateAll(context)
         }
     }
@@ -885,7 +887,7 @@ private fun NittcSchedulerContent(viewModel: SchedulerViewModel, startOnTimetabl
         if (isGranted) {
             android.util.Log.d("NittcSchedulerApp", "通知権限が許可されました")
             appScope.launch {
-                LessonStartNotificationWorker.rescheduleAll(context)
+                NotificationRebuildCoordinator.rebuild(context, "notification_permission_granted")
             }
         } else {
             android.util.Log.w("NittcSchedulerApp", "通知権限が拒否されました")

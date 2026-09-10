@@ -1,23 +1,17 @@
 package jp.linkserver.nittcsc
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import jp.linkserver.nittcsc.data.AppDatabase
 import jp.linkserver.nittcsc.data.SchedulerRepository
 import jp.linkserver.nittcsc.data.UiDesignPreferences
-import jp.linkserver.nittcsc.reminder.LessonStartNotificationWorker
-import jp.linkserver.nittcsc.reminder.PlanReminderWorker
-import jp.linkserver.nittcsc.reminder.TaskReminderWorker
+import jp.linkserver.nittcsc.reminder.NotificationRebuildCoordinator
 import jp.linkserver.nittcsc.reminder.TaskReminderNotifier
 import jp.linkserver.nittcsc.sync.CloudFileSyncManager
 import jp.linkserver.nittcsc.sync.LocalSyncManager
@@ -48,7 +42,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        requestNotificationPermission()
         TaskReminderNotifier.initializeNotificationChannel(this)
         enableEdgeToEdge()
         setContent {
@@ -60,21 +53,7 @@ class MainActivity : ComponentActivity() {
         CloudFileSyncManager.start(this)
         WidgetUpdateWorker.schedule(this)
         lifecycleScope.launch {
-            TaskReminderWorker.rescheduleAll(this@MainActivity)
-            PlanReminderWorker.rescheduleAll(this@MainActivity)
-            LessonStartNotificationWorker.rescheduleAll(this@MainActivity)
-        }
-    }
-
-    private fun requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(
-                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                NOTIFICATION_PERMISSION_REQUEST_CODE
-            )
+            NotificationRebuildCoordinator.rebuild(this@MainActivity, "app_start")
         }
     }
 
@@ -88,7 +67,4 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    companion object {
-        private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 1001
-    }
 }

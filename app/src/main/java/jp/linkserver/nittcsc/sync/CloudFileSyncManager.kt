@@ -7,6 +7,7 @@ import androidx.room.InvalidationTracker
 import jp.linkserver.nittcsc.data.AppDatabase
 import jp.linkserver.nittcsc.data.SchedulerRepository
 import jp.linkserver.nittcsc.data.UiDesignPreferences
+import jp.linkserver.nittcsc.reminder.NotificationRebuildCoordinator
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -287,6 +288,7 @@ object CloudFileSyncManager {
                     applyingRemote.set(true)
                     captureSyncFailure {
                         repository(appContext).importAllData(remote.payload, requireSettings = true)
+                        NotificationRebuildCoordinator.rebuild(appContext, "cloud_sync_pull")
                         val stateStored = preferences.edit()
                             .putLong(KEY_LAST_REMOTE_UPDATED_AT, remote.updatedAt)
                             .putBoolean(KEY_LOCAL_DIRTY, false)

@@ -20,6 +20,7 @@ import jp.linkserver.nittcsc.data.SchedulerRepository
 import jp.linkserver.nittcsc.data.SYNC_PROTOCOL_VERSION_KEY
 import jp.linkserver.nittcsc.data.requireCompatibleSyncProtocols
 import jp.linkserver.nittcsc.data.requireCurrentSyncProtocol
+import jp.linkserver.nittcsc.reminder.NotificationRebuildCoordinator
 import jp.linkserver.nittcsc.sync.SyncChoice
 import jp.linkserver.nittcsc.sync.SyncConflict
 import kotlinx.coroutines.CoroutineScope
@@ -402,6 +403,7 @@ class NearbySyncManager(
         val merged = withContext(Dispatchers.IO) {
             val merged = buildMergeWithResolutions(localPayload, remotePayload, resolutions)
             repository.applySyncPayload(merged)
+            NotificationRebuildCoordinator.rebuild(appContext, "nearby_sync_merge")
             merged
         }
 
@@ -430,6 +432,7 @@ class NearbySyncManager(
 
         withContext(Dispatchers.IO) {
             repository.applySyncPayload(mergedPayload)
+            NotificationRebuildCoordinator.rebuild(appContext, "nearby_sync_receive")
         }
 
         verifyConsistency(endpointId)
