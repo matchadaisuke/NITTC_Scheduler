@@ -8,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -17,9 +18,11 @@ import jp.linkserver.nittcsc.data.UiDesignPreferences
 import jp.linkserver.nittcsc.reminder.LessonStartNotificationWorker
 import jp.linkserver.nittcsc.reminder.PlanReminderWorker
 import jp.linkserver.nittcsc.reminder.TaskReminderWorker
+import jp.linkserver.nittcsc.reminder.TaskReminderNotifier
 import jp.linkserver.nittcsc.sync.CloudFileSyncManager
 import jp.linkserver.nittcsc.sync.LocalSyncManager
 import jp.linkserver.nittcsc.sync.NearbySyncManager
+import jp.linkserver.nittcsc.sync.NearbySyncPreferences
 import jp.linkserver.nittcsc.ui.NittcSchedulerApp
 import jp.linkserver.nittcsc.ui.theme.AppTheme
 import jp.linkserver.nittcsc.viewmodel.SchedulerViewModel
@@ -35,12 +38,18 @@ class MainActivity : ComponentActivity() {
         val repository = SchedulerRepository(database, UiDesignPreferences(this))
         val syncManager = LocalSyncManager(this, repository, database)
         val nearbySyncManager = NearbySyncManager(this, repository)
-        SchedulerViewModelFactory(repository, syncManager, nearbySyncManager)
+        SchedulerViewModelFactory(
+            repository,
+            syncManager,
+            nearbySyncManager,
+            nearbyStandbyEnabledInitially = !NearbySyncPreferences.suppressAutomaticPrompts(this)
+        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestNotificationPermission()
+        TaskReminderNotifier.initializeNotificationChannel(this)
         enableEdgeToEdge()
         setContent {
             val uiDesignMode by viewModel.uiDesignMode.collectAsStateWithLifecycle()
@@ -76,9 +85,6 @@ class MainActivity : ComponentActivity() {
             WidgetUpdater.updateTaskWidgets(this@MainActivity)
             WidgetUpdater.updateAll(this@MainActivity)
             viewModel.runAutoSync()
-            if (CloudFileSyncManager.isConfigured(this@MainActivity)) {
-                CloudFileSyncManager.syncNow(this@MainActivity)
-            }
         }
     }
 

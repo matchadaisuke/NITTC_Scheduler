@@ -2,8 +2,15 @@
 <resources>
     <string name="sync_title_mega_sync">MEGA同期</string>
     <string name="cd_open_mega_sync">MEGA同期を開く</string>
+    <string name="cd_sync_now_long_press_settings">MEGA同期。長押しで設定を開く</string>
     <string name="settings_legacy_local_sync_title">旧・端末間同期</string>
     <string name="settings_legacy_local_sync_summary">本家のWi-Fi / Nearby / 信頼済み端末による同期を利用します。</string>
+    <string name="settings_suppress_nearby_prompts_title">Nearby同期の案内を表示しない</string>
+    <string name="settings_suppress_nearby_prompts_summary">起動時の権限案内とNearby接続の自動待機を無効にします。手動でのNearby同期は引き続き利用できます。</string>
+    <string name="nearby_permission_rationale_title">近くの端末との同期について</string>
+    <string name="nearby_permission_rationale_message">このアプリは近くの端末と直接通信してデータを同期できます。Bluetooth・Wi-Fi・位置情報の権限は近くのデバイスを検出するためにのみ使用し、現在地の取得や記録には使用しません。\n\n同期機能を使用しない場合は「スキップ」を選択してください。</string>
+    <string name="nearby_permission_rationale_allow">許可する</string>
+    <string name="nearby_permission_rationale_skip">スキップ</string>
     <string name="settings_sync_category">同期</string>
     <string name="mega_sync_description">MEGAアカウントへアプリ内でログインし、時間割・詳細時刻・設定・通知設定を自動同期します。ファイル選択やMEGAアプリは不要です。</string>
     <string name="mega_sync_android_version_unsupported">MEGA公式SDKの対応範囲に合わせ、MEGA同期はAndroid 9以降で利用できます。</string>

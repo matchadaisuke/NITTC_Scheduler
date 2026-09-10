@@ -20,6 +20,7 @@ import jp.linkserver.nittcsc.MainActivity
 import jp.linkserver.nittcsc.R
 import jp.linkserver.nittcsc.data.AppDatabase
 import jp.linkserver.nittcsc.data.PlanEntity
+import jp.linkserver.nittcsc.sync.CloudFileSyncManager
 import java.time.Duration
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -76,11 +77,12 @@ class PlanReminderWorker(
             .setContentIntent(openAppPendingIntent)
             .build()
 
-        NotificationManagerCompat.from(applicationContext).notifyIfAllowed(
+        val posted = NotificationManagerCompat.from(applicationContext).notifyIfAllowed(
             applicationContext,
             planReminderNotificationId(plan.id),
             notification
         )
+        if (posted) CloudFileSyncManager.requestSync(applicationContext)
 
         return Result.success()
     }

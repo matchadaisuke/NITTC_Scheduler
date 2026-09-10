@@ -21,8 +21,10 @@ fun NotificationManagerCompat.notifyIfAllowed(
     context: Context,
     notificationId: Int,
     notification: Notification
-) {
-    if (context.canPostAppNotifications()) {
+): Boolean {
+    val allowed = context.canPostAppNotifications()
+    if (allowed) {
         notify(notificationId, notification)
     }
+    return allowed
 }

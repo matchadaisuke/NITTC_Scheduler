@@ -19,6 +19,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import jp.linkserver.nittcsc.MainActivity
 import jp.linkserver.nittcsc.R
+import jp.linkserver.nittcsc.sync.CloudFileSyncManager
 import jp.linkserver.nittcsc.data.AppDatabase
 import jp.linkserver.nittcsc.data.ChangedLessonEntity
 import jp.linkserver.nittcsc.data.DayType
@@ -173,6 +174,7 @@ class AdditionalLessonNotificationWorker(
             .build()
         try {
             NotificationManagerCompat.from(applicationContext).notify(notificationId, notification)
+            CloudFileSyncManager.requestSync(applicationContext)
         } catch (_: SecurityException) {
             // Notification permission may be revoked independently.
         }
@@ -185,7 +187,7 @@ class AdditionalLessonNotificationWorker(
         private const val KEY_DATE = "date"
         private const val KEY_SLOT_INDEX = "slot_index"
         private const val KEY_TRIGGER = "trigger"
-        private const val HORIZON_DAYS = 30L
+        private const val HORIZON_DAYS = ReminderSchedulingPolicy.LESSON_ALARM_HORIZON_DAYS
         private const val ALARM_PREFS = "additional_lesson_notification_alarms"
         private const val ALARM_KEYS = "scheduled_alarm_keys"
         private val rescheduleMutex = Mutex()

@@ -188,6 +188,7 @@ import jp.linkserver.nittcsc.data.UiDesignMode
 import jp.linkserver.nittcsc.logic.CLASS_SLOTS
 import jp.linkserver.nittcsc.logic.ClassSlot
 import jp.linkserver.nittcsc.logic.ExportRange
+import jp.linkserver.nittcsc.sync.CloudFileSyncManager
 import jp.linkserver.nittcsc.logic.ExportResult
 import jp.linkserver.nittcsc.logic.LessonKey
 import jp.linkserver.nittcsc.logic.NaturalLanguageLessonCandidate
@@ -238,6 +239,7 @@ import jp.linkserver.nittcsc.ui.theme.Typography as StandardTypography
 import jp.linkserver.nittcsc.viewmodel.SchedulerUiState
 import jp.linkserver.nittcsc.viewmodel.SchedulerViewModel
 import jp.linkserver.nittcsc.sync.NearbyPhase
+import jp.linkserver.nittcsc.sync.NearbySyncPreferences
 import jp.linkserver.nittcsc.update.AppUpdateInfo
 import jp.linkserver.nittcsc.update.checkGitHubReleaseUpdate
 import jp.linkserver.nittcsc.update.dismissUpdateNotificationUntilNextVersion
@@ -453,6 +455,9 @@ private fun NittcSchedulerContent(viewModel: SchedulerViewModel, startOnTimetabl
     var showSyncDiscovery by rememberSaveable { mutableStateOf(false) }
     var showNearbySync by rememberSaveable { mutableStateOf(false) }
     var showNearbyPermissionRationale by rememberSaveable { mutableStateOf(false) }
+    var suppressNearbyAutomaticPrompts by remember {
+        mutableStateOf(NearbySyncPreferences.suppressAutomaticPrompts(context))
+    }
     var pendingNearbyPerms by remember { mutableStateOf<Array<String>>(emptyArray()) }
     var showVlmImport by rememberSaveable { mutableStateOf(false) }
     var showAbout by rememberSaveable { mutableStateOf(false) }
@@ -749,7 +754,11 @@ private fun NittcSchedulerContent(viewModel: SchedulerViewModel, startOnTimetabl
     // スタンバイ広告中に相手から接続要求が来たら自動的に Nearby 画面へ遷移
     val nearbyPhase by viewModel.nearbyState.collectAsState()
     LaunchedEffect(nearbyPhase.phase) {
-        if (nearbyPhase.phase == NearbyPhase.AUTH_CONFIRM && !showNearbySync) {
+        if (
+            !suppressNearbyAutomaticPrompts &&
+            nearbyPhase.phase == NearbyPhase.AUTH_CONFIRM &&
+            !showNearbySync
+        ) {
             showNearbySync = true
         }
     }
@@ -887,8 +896,9 @@ private fun NittcSchedulerContent(viewModel: SchedulerViewModel, startOnTimetabl
     val nearbyStandbyPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
-        if (results.values.all { it }) {
+        if (!suppressNearbyAutomaticPrompts && results.values.all { it }) {
             // 権限が付与されたらスタンバイ広告を開始
+            viewModel.setNearbyStandbyEnabled(true)
             viewModel.retryStandbyAdvertising()
         }
     }
@@ -907,8 +917,13 @@ private fun NittcSchedulerContent(viewModel: SchedulerViewModel, startOnTimetabl
     }
 
     // アプリ起動時にNearby Connections権限を確認し、スタンバイ広告を確実に開始する
-    LaunchedEffect(uiState.syncProfile != null) {
-        if (uiState.syncProfile == null) return@LaunchedEffect
+    LaunchedEffect(uiState.syncProfile != null, suppressNearbyAutomaticPrompts) {
+        if (uiState.syncProfile == null || suppressNearbyAutomaticPrompts) {
+            showNearbyPermissionRationale = false
+            pendingNearbyPerms = emptyArray()
+            viewModel.setNearbyStandbyEnabled(false)
+            return@LaunchedEffect
+        }
         val nearbyPerms = buildList {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
                 add(Manifest.permission.BLUETOOTH_SCAN)
@@ -925,9 +940,11 @@ private fun NittcSchedulerContent(viewModel: SchedulerViewModel, startOnTimetabl
         }
         if (allGranted) {
             // すでに権限がある場合はスタンバイ広告を再試行（起動時の失敗をリカバリ）
+            viewModel.setNearbyStandbyEnabled(true)
             viewModel.retryStandbyAdvertising()
         } else {
             // 未付与の場合は先に説明ダイアログを表示してからリクエスト
+            viewModel.setNearbyStandbyEnabled(false)
             pendingNearbyPerms = nearbyPerms.toTypedArray()
             showNearbyPermissionRationale = true
         }
@@ -970,29 +987,24 @@ private fun NittcSchedulerContent(viewModel: SchedulerViewModel, startOnTimetabl
     }
 
     // Nearby権限の使用目的説明ダイアログ
-    if (showNearbyPermissionRationale) {
+    if (showNearbyPermissionRationale && !suppressNearbyAutomaticPrompts) {
         AlertDialog(
             onDismissRequest = { showNearbyPermissionRationale = false },
-            title = { Text("近くの端末との同期について") },
+            title = { Text(stringResource(R.string.nearby_permission_rationale_title)) },
             text = {
-                Text(
-                    "このアプリは近くの端末と直接通信してデータを同期する機能を備えています。\n\n" +
-                    "この機能のために、Bluetooth・Wi-Fi・位置情報の権限が必要です。" +
-                    "位置情報は近くのデバイスを検出するためにのみ使用され、現在地の取得や記録には使用しません。\n\n" +
-                    "同期機能を使用しない場合は「スキップ」を選択してください。"
-                )
+                Text(stringResource(R.string.nearby_permission_rationale_message))
             },
             confirmButton = {
                 TextButton(onClick = {
                     showNearbyPermissionRationale = false
                     nearbyStandbyPermissionLauncher.launch(pendingNearbyPerms)
                 }) {
-                    Text("許可する")
+                    Text(stringResource(R.string.nearby_permission_rationale_allow))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showNearbyPermissionRationale = false }) {
-                    Text("スキップ")
+                    Text(stringResource(R.string.nearby_permission_rationale_skip))
                 }
             }
         )
@@ -1163,8 +1175,8 @@ private fun NittcSchedulerContent(viewModel: SchedulerViewModel, startOnTimetabl
                     snackbarHostState.showSnackbar(msgTaskCalendarSyncSkipped)
                     pendingTask
                 }
-                viewModel.saveTaskDirect(taskToSave)
-                TaskReminderWorker.syncTaskReminder(context, taskToSave)
+                val persistedTask = viewModel.saveTaskDirect(taskToSave)
+                TaskReminderWorker.syncTaskReminder(context, persistedTask)
             }
         }
 
@@ -1179,8 +1191,8 @@ private fun NittcSchedulerContent(viewModel: SchedulerViewModel, startOnTimetabl
                     snackbarHostState.showSnackbar(msgTaskCalendarSyncSkipped)
                     pendingPlan
                 }
-                viewModel.savePlanDirect(planToSave)
-                PlanReminderWorker.syncPlanReminder(context, planToSave)
+                val persistedPlan = viewModel.savePlanDirect(planToSave)
+                PlanReminderWorker.syncPlanReminder(context, persistedPlan)
             }
         }
     }
@@ -1942,6 +1954,12 @@ private fun NittcSchedulerContent(viewModel: SchedulerViewModel, startOnTimetabl
                         showAbout = true
                     },
                     onOpenLocalSync = { showLegacySync = true },
+                    suppressNearbyAutomaticPrompts = suppressNearbyAutomaticPrompts,
+                    onToggleSuppressNearbyAutomaticPrompts = { suppress ->
+                        if (NearbySyncPreferences.setSuppressAutomaticPrompts(context, suppress)) {
+                            suppressNearbyAutomaticPrompts = suppress
+                        }
+                    },
                     onToggleLocalAi = viewModel::toggleLocalAi,
                     onToggleNaturalLanguageTaskAdd = viewModel::toggleNaturalLanguageTaskAdd,
                     onToggleDrawerNavigation = viewModel::toggleDrawerNavigation,
@@ -2717,10 +2735,23 @@ private fun NittcSchedulerContent(viewModel: SchedulerViewModel, startOnTimetabl
                                                         Icon(Icons.Filled.AutoFixHigh, contentDescription = stringResource(R.string.cd_ai_import))
                                                     }
                                                 }
-                                                AppIconButton(onClick = { showSync = true }) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(48.dp)
+                                                        .combinedClickable(
+                                                            onClick = {
+                                                                appScope.launch {
+                                                                    val message = CloudFileSyncManager.syncNow(context)
+                                                                    snackbarHostState.showSnackbar(message)
+                                                                }
+                                                            },
+                                                            onLongClick = { showSync = true }
+                                                        ),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
                                                     Icon(
                                                         painter = painterResource(R.drawable.sync_desktop),
-                                                        contentDescription = stringResource(R.string.cd_open_mega_sync)
+                                                        contentDescription = stringResource(R.string.cd_sync_now_long_press_settings)
                                                     )
                                                 }
                                                 AppIconButton(onClick = { showSettings = true }) {
