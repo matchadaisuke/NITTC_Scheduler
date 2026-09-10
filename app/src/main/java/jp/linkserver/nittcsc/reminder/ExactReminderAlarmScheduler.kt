@@ -17,9 +17,6 @@ internal object ExactReminderAlarmScheduler {
         pendingIntent: PendingIntent
     ): Boolean {
         val alarmManager = context.getSystemService(AlarmManager::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) {
-            return false
-        }
         val triggerAtMillis = triggerAt
             .atZone(ZoneId.systemDefault())
             .toInstant()
@@ -27,14 +24,24 @@ internal object ExactReminderAlarmScheduler {
         if (triggerAtMillis <= System.currentTimeMillis()) return false
 
         return runCatching {
-            alarmManager.setExactAndAllowWhileIdle(
-                AlarmManager.RTC_WAKEUP,
-                triggerAtMillis,
-                pendingIntent
-            )
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && alarmManager.canScheduleExactAlarms()) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerAtMillis,
+                    pendingIntent
+                )
+            } else {
+                // Exact alarm permission is often disabled by default on Android 12+.
+                // Use an inexact idle-safe alarm instead of silently dropping reminders.
+                alarmManager.setAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerAtMillis,
+                    pendingIntent
+                )
+            }
             true
         }.onFailure {
-            Log.w(TAG, "Cannot schedule exact reminder alarm", it)
+            Log.w(TAG, "Cannot schedule reminder alarm", it)
         }.getOrDefault(false)
     }
 
