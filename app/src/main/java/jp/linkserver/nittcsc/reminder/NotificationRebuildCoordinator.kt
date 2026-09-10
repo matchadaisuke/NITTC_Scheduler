@@ -12,13 +12,12 @@ import android.util.Log
 object NotificationRebuildCoordinator {
     private const val TAG = "NotificationRebuild"
 
-    fun rebuild(context: Context, reason: String) {
+    suspend fun rebuild(context: Context, reason: String) {
         Log.d(TAG, "Rebuilding notification schedules: $reason")
 
         // Intentionally centralized. Existing alarm registrations will be
         // migrated here one by one so imports, MEGA sync and settings changes
         // all share the same recovery path.
         LessonStartNotificationWorker.rescheduleAll(context)
-        AdditionalLessonNotificationWorker.rescheduleAll(context)
     }
 }
