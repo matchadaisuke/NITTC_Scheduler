@@ -1642,10 +1642,6 @@ fun SettingsScreen(
             }
         }
 
-        if (isIntDev) {
-            NotificationDebugSettingsContent()
-        }
-
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             AppSettingsCategory(title = stringResource(R.string.settings_sync_category))
             CloudFileSyncSettingsContent()

@@ -306,6 +306,9 @@ fun AboutScreen(
                 }
             }
 
+            // リリースビルドでも通知経路を端末上で診断できるよう常時表示する。
+            NotificationDebugSettingsContent()
+
             // ── オープンソースライセンス ──────────────────────────────
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
