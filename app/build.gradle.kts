@@ -307,6 +307,13 @@ tasks.named("preBuild").configure {
 android {
     namespace = "jp.linkserver.nittcsc"
     compileSdk = 37
+    val requestedAbi = providers.gradleProperty("APP_ABI").orNull
+    val supportedAbis = setOf("arm64-v8a", "x86_64")
+    if (requestedAbi != null && requestedAbi !in supportedAbis) {
+        throw GradleException(
+            "Unsupported APP_ABI '$requestedAbi'. Supported values: ${supportedAbis.joinToString()}"
+        )
+    }
 
     defaultConfig {
         applicationId = "jp.linkserver.nittcsc"
@@ -318,6 +325,11 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
+        requestedAbi?.let { abi ->
+            ndk {
+                abiFilters += abi
+            }
+        }
     }
 
     signingConfigs {

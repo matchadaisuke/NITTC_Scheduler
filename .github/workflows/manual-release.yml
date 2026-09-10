@@ -90,7 +90,7 @@ jobs:
           test -s "$NITTC_RELEASE_STORE_FILE"
           echo "NITTC_RELEASE_STORE_FILE=$NITTC_RELEASE_STORE_FILE" >> "$GITHUB_ENV"
 
-      - name: Test, lint, and build signed release APK
+      - name: Test and lint
         shell: bash
         run: |
           set -euo pipefail
@@ -101,50 +101,68 @@ jobs:
             -PAPP_VERSION_CODE="$VERSION_CODE" \
             :app:testDebugUnitTest \
             :app:lintDebug \
-            :app:assembleRelease \
             --stacktrace
 
-      - name: Verify and stage APK
-        id: artifact
+      - name: Build, verify, and stage ABI APKs
         shell: bash
         run: |
           set -euo pipefail
-          apk="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print -quit)"
-          [[ -n "$apk" && -s "$apk" ]] || {
-            echo "::error::Release APK was not produced"
-            exit 1
-          }
           apksigner="$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner -print | sort -V | tail -n 1)"
           aapt="$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name aapt -print | sort -V | tail -n 1)"
           [[ -x "$apksigner" && -x "$aapt" ]] || {
             echo "::error::Android APK verification tools were not found"
             exit 1
           }
-          "$apksigner" verify --verbose --print-certs "$apk"
-          badging="$("$aapt" dump badging "$apk" | head -n 1)"
-          grep -Fq "versionCode='$VERSION_CODE'" <<< "$badging"
-          grep -Fq "versionName='$VERSION_NAME'" <<< "$badging"
           mkdir -p dist
-          output="dist/NITTC-Scheduler-v${VERSION_NAME}.apk"
-          cp "$apk" "$output"
-          sha256sum "$output" > "${output}.sha256"
-          echo "apk=$output" >> "$GITHUB_OUTPUT"
-          echo "checksum=${output}.sha256" >> "$GITHUB_OUTPUT"
+
+          for abi in arm64-v8a x86_64; do
+            rm -rf app/build/outputs/apk/release
+            ./gradlew \
+              -Dorg.gradle.java.home="$JAVA_HOME" \
+              -PAPP_VERSION_NAME="$VERSION_NAME" \
+              -PAPP_VERSION_CODE="$VERSION_CODE" \
+              -PAPP_ABI="$abi" \
+              :app:assembleRelease \
+              --stacktrace
+
+            apk="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print -quit)"
+            [[ -n "$apk" && -s "$apk" ]] || {
+              echo "::error::Release APK was not produced for ABI: $abi"
+              exit 1
+            }
+            "$apksigner" verify --verbose --print-certs "$apk"
+            badging="$("$aapt" dump badging "$apk" | head -n 1)"
+            grep -Fq "versionCode='$VERSION_CODE'" <<< "$badging"
+            grep -Fq "versionName='$VERSION_NAME'" <<< "$badging"
+
+            native_libs="$(unzip -Z1 "$apk" | grep '^lib/' || true)"
+            if grep -q '^lib/' <<< "$native_libs"; then
+              if grep -v "^lib/${abi}/" <<< "$native_libs" | grep -q .; then
+                echo "::error::APK for $abi contains native libraries for another ABI"
+                printf '%s\n' "$native_libs"
+                exit 1
+              fi
+            fi
+
+            output="dist/NITTC-Scheduler-v${VERSION_NAME}-${abi}.apk"
+            cp "$apk" "$output"
+            sha256sum "$output" > "${output}.sha256"
+          done
 
       - name: Publish GitHub Release
         shell: bash
         env:
           RELEASE_NOTES: ${{ inputs.release_notes }}
           PRERELEASE: ${{ inputs.prerelease }}
-          APK_PATH: ${{ steps.artifact.outputs.apk }}
-          CHECKSUM_PATH: ${{ steps.artifact.outputs.checksum }}
         run: |
           set -euo pipefail
           tag="v${VERSION_NAME}"
           args=(
             "$tag"
-            "$APK_PATH#NITTC Scheduler v${VERSION_NAME} APK"
-            "$CHECKSUM_PATH#SHA-256 checksum"
+            "dist/NITTC-Scheduler-v${VERSION_NAME}-arm64-v8a.apk#NITTC Scheduler v${VERSION_NAME} arm64-v8a APK"
+            "dist/NITTC-Scheduler-v${VERSION_NAME}-arm64-v8a.apk.sha256#arm64-v8a SHA-256 checksum"
+            "dist/NITTC-Scheduler-v${VERSION_NAME}-x86_64.apk#NITTC Scheduler v${VERSION_NAME} x86_64 APK"
+            "dist/NITTC-Scheduler-v${VERSION_NAME}-x86_64.apk.sha256#x86_64 SHA-256 checksum"
             --target "$GITHUB_SHA"
             --title "NITTC Scheduler v${VERSION_NAME}"
           )
