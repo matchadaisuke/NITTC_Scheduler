@@ -51,6 +51,7 @@ import jp.linkserver.nittcsc.logic.applyChangedLesson
 import jp.linkserver.nittcsc.logic.formatExamPeriodLabel
 import jp.linkserver.nittcsc.logic.generateClassSlots
 import jp.linkserver.nittcsc.logic.timetableTermForDate
+import jp.linkserver.nittcsc.sync.CloudFileSyncManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
@@ -71,6 +72,7 @@ class LessonStartNotificationWorker(
 
     private var customConfig: LessonNotificationCustomization? = null
     private var nextLessonForTemplate: NextLessonSnapshot? = null
+    private var cloudSyncRequestedForNotification = false
 
     override suspend fun doWork(): Result {
         val date = runCatching { LocalDate.parse(inputData.getString(KEY_DATE).orEmpty()) }
@@ -400,6 +402,10 @@ class LessonStartNotificationWorker(
         try {
             NotificationManagerCompat.from(applicationContext)
                 .notify(notificationId, notification)
+            if (!cloudSyncRequestedForNotification) {
+                cloudSyncRequestedForNotification = true
+                CloudFileSyncManager.requestSync(applicationContext)
+            }
         } catch (_: SecurityException) {
             // The POST_NOTIFICATIONS permission can be revoked independently of this feature.
         }
@@ -593,7 +599,7 @@ class LessonStartNotificationWorker(
         private const val KEY_SLOT_INDEX = "slot_index"
         private const val TAG = "LessonStartNotification"
         private const val WORK_TAG = "lesson_start_notifications"
-        private const val HORIZON_DAYS = 30L
+        private const val HORIZON_DAYS = ReminderSchedulingPolicy.LESSON_ALARM_HORIZON_DAYS
         private const val ONE_MINUTE_MS = 60_000L
         private const val LIVE_UPDATE_FAST_REFRESH_THRESHOLD_MS = 10 * ONE_MINUTE_MS
         private const val LIVE_UPDATE_SMOOTH_REFRESH_MS = 2_000L

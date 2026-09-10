@@ -132,6 +132,8 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onAbout: () -> Unit,
     onOpenLocalSync: () -> Unit = {},
+    suppressNearbyAutomaticPrompts: Boolean = true,
+    onToggleSuppressNearbyAutomaticPrompts: (Boolean) -> Unit = {},
     onToggleLocalAi: (Boolean) -> Unit,
     onToggleNaturalLanguageTaskAdd: (Boolean) -> Unit = {},
     onToggleDrawerNavigation: (Boolean) -> Unit,
@@ -1640,10 +1642,22 @@ fun SettingsScreen(
             }
         }
 
+        if (isIntDev) {
+            NotificationDebugSettingsContent()
+        }
+
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             AppSettingsCategory(title = stringResource(R.string.settings_sync_category))
             CloudFileSyncSettingsContent()
             AppSettingsGroup {
+                item("suppress_nearby_automatic_prompts") {
+                    SettingsSwitchRow(
+                        title = stringResource(R.string.settings_suppress_nearby_prompts_title),
+                        description = stringResource(R.string.settings_suppress_nearby_prompts_summary),
+                        checked = suppressNearbyAutomaticPrompts,
+                        onCheckedChange = onToggleSuppressNearbyAutomaticPrompts
+                    )
+                }
                 item("legacy_local_sync") {
                     AppSettingsNavigationItem(
                         title = stringResource(R.string.settings_legacy_local_sync_title),

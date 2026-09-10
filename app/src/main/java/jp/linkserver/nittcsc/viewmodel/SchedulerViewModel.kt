@@ -123,7 +123,8 @@ data class SchedulerUiState(
 class SchedulerViewModel(
     private val repository: SchedulerRepository,
     private val syncManager: LocalSyncManager? = null,
-    val nearbySyncManager: NearbySyncManager? = null
+    val nearbySyncManager: NearbySyncManager? = null,
+    nearbyStandbyEnabledInitially: Boolean = true
 ) : ViewModel() {
 
     private val selectedDayOfWeek = MutableStateFlow(DayOfWeek.MONDAY.value)
@@ -131,6 +132,7 @@ class SchedulerViewModel(
     private val initialized = MutableStateFlow(false)
     private val _snackbarMessages = MutableSharedFlow<String>()
     private val syncDiagnosticsFlow = syncManager?.diagnostics ?: kotlinx.coroutines.flow.MutableStateFlow(SyncDiagnostics())
+    private var nearbyStandbyEnabled = nearbyStandbyEnabledInitially
 
     val uiDesignMode: StateFlow<UiDesignMode> = repository.uiDesignModeFlow.stateIn(
         scope = viewModelScope,
@@ -267,6 +269,7 @@ class SchedulerViewModel(
             initialized.value = true
 
             // アプリ起動後、Nearbyアドバタイズをスタンバイ開始（相手から見つけられるようにする）
+            if (!nearbyStandbyEnabled) return@launch
             val manager = nearbySyncManager ?: return@launch
             val profile = syncManager?.getProfile()
             manager.setLocalName(profile?.deviceName ?: android.os.Build.MODEL)
@@ -312,6 +315,7 @@ class SchedulerViewModel(
     fun stopNearbySync() {
         nearbySyncManager?.stopAll()
         // 画面を閉じた後もスタンバイ広告を再開して引き続き見つけられるようにする
+        if (!nearbyStandbyEnabled) return
         viewModelScope.launch {
             val profile = syncManager?.getProfile()
             nearbySyncManager?.setLocalName(profile?.deviceName ?: android.os.Build.MODEL)
@@ -321,11 +325,20 @@ class SchedulerViewModel(
 
     /** パーミッション付与後などにスタンバイ広告を（再）開始する */
     fun retryStandbyAdvertising() {
+        if (!nearbyStandbyEnabled) return
         val manager = nearbySyncManager ?: return
         viewModelScope.launch {
             val profile = syncManager?.getProfile()
             manager.setLocalName(profile?.deviceName ?: android.os.Build.MODEL)
             manager.startStandbyAdvertising()
+        }
+    }
+
+    fun setNearbyStandbyEnabled(enabled: Boolean) {
+        if (nearbyStandbyEnabled == enabled) return
+        nearbyStandbyEnabled = enabled
+        if (!enabled) {
+            nearbySyncManager?.stopAll()
         }
     }
 
@@ -1010,12 +1023,18 @@ class SchedulerViewModel(
 class SchedulerViewModelFactory(
     private val repository: SchedulerRepository,
     private val syncManager: LocalSyncManager? = null,
-    private val nearbySyncManager: NearbySyncManager? = null
+    private val nearbySyncManager: NearbySyncManager? = null,
+    private val nearbyStandbyEnabledInitially: Boolean = true
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(SchedulerViewModel::class.java)) {
-            return SchedulerViewModel(repository, syncManager, nearbySyncManager) as T
+            return SchedulerViewModel(
+                repository,
+                syncManager,
+                nearbySyncManager,
+                nearbyStandbyEnabledInitially
+            ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

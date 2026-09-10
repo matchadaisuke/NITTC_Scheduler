@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- A MEGA session grants account access and must never leave the originating device. -->
+    <exclude domain="sharedpref" path="mega_sync.xml" />
+</full-backup-content>

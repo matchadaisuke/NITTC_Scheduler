@@ -2,31 +2,24 @@ package jp.linkserver.nittcsc.sync
 
 import android.content.Context
 import android.os.Build
+import android.util.Log
 import androidx.room.InvalidationTracker
-import androidx.work.Constraints
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.WorkManager
 import jp.linkserver.nittcsc.data.AppDatabase
 import jp.linkserver.nittcsc.data.SchedulerRepository
 import jp.linkserver.nittcsc.data.UiDesignPreferences
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import java.io.File
-import java.lang.reflect.Method
 import java.lang.reflect.Proxy
 import java.util.UUID
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -51,15 +44,14 @@ object CloudFileSyncManager {
     private const val CLOUD_VERSION = 2
     private const val REMOTE_FOLDER_NAME = "NITTC Scheduler"
     private const val REMOTE_FILE_NAME = "scheduler-sync.json"
-    private const val PERIODIC_WORK = "mega_sync_periodic"
     private const val USER_AGENT = "NITTC-Scheduler/MEGA-Sync"
+    private const val TAG = "MegaSync"
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val syncMutex = Mutex()
     private val runtimeMutex = Mutex()
     private val applyingRemote = AtomicBoolean(false)
     private var databaseObserver: InvalidationTracker.Observer? = null
-    private var pushJob: Job? = null
 
     @Volatile
     private var runtime: MegaRuntime? = null
@@ -83,12 +75,8 @@ object CloudFileSyncManager {
         val appContext = context.applicationContext
         registerDatabaseObserver(appContext)
         if (!isConfigured(appContext)) return
-        schedulePeriodic(appContext)
-        scope.launch {
-            ensureRuntime(appContext)?.let {
-                runCatching { syncNow(appContext) }
-            }
-        }
+        CloudFileSyncWorker.schedule(appContext)
+        requestSync(appContext)
     }
 
     fun isConfigured(context: Context): Boolean =
@@ -128,45 +116,49 @@ object CloudFileSyncManager {
             return setStatus(appContext, "MEGAのメールアドレスとパスワードを入力してください")
         }
 
-        return runtimeMutex.withLock {
+        val loginFailure = runtimeMutex.withLock {
             val candidate = runCatching { MegaRuntime(appContext) }
                 .getOrElse {
-                    return@withLock setStatus(appContext, "MEGA SDKの初期化に失敗しました: ${it.userMessage()}")
+                    return@withLock "MEGA SDKの初期化に失敗しました: ${it.userMessage()}"
                 }
-            val result = runCatching {
+            try {
                 candidate.login(normalizedEmail, password, pin?.trim()?.takeIf { it.isNotEmpty() })
                 candidate.fetchNodes()
                 val session = candidate.dumpSession()
                 require(session.isNotBlank()) { "MEGAセッションを取得できませんでした" }
                 candidate.observeNodeChanges {
-                    scope.launch {
-                        delay(700)
-                        runCatching { syncNow(appContext) }
-                    }
+                    CloudFileSyncWorker.enqueueImmediate(appContext)
                 }
-                runtime?.close()
-                runtime = candidate
-                prefs(appContext).edit()
+                val sessionStored = prefs(appContext).edit()
                     .putString(KEY_SESSION, session)
                     .putString(KEY_EMAIL, normalizedEmail)
                     .putLong(KEY_LAST_REMOTE_UPDATED_AT, 0L)
                     .putBoolean(KEY_LOCAL_DIRTY, true)
                     .putLong(KEY_LOCAL_DIRTY_AT, System.currentTimeMillis())
-                    .apply()
-                schedulePeriodic(appContext)
+                    .commit()
+                check(sessionStored) { "MEGAセッションを端末へ保存できませんでした" }
+                val previousRuntime = runtime
+                runtime = candidate
+                previousRuntime?.close()
+                CloudFileSyncWorker.schedule(appContext)
                 registerDatabaseObserver(appContext)
-                syncNow(appContext, preferRemote = true)
-            }
-            result.getOrElse { error ->
+                null
+            } catch (cancelled: CancellationException) {
                 candidate.close()
-                val message = when ((error as? MegaOperationException)?.code) {
+                throw cancelled
+            } catch (error: Throwable) {
+                candidate.close()
+                when ((error as? MegaOperationException)?.code) {
                     -26 -> "2段階認証が有効です。認証コードを入力して再度ログインしてください"
                     -9 -> "MEGAのメールアドレスまたはパスワードが正しくありません"
                     else -> "MEGAへのログインに失敗しました: ${error.userMessage()}"
                 }
-                setStatus(appContext, message)
             }
         }
+        if (loginFailure != null) return setStatus(appContext, loginFailure)
+        // Never acquire syncMutex while runtimeMutex is held. Background restore takes them
+        // in the opposite order and would otherwise deadlock with an interactive login.
+        return syncNow(appContext, preferRemote = true)
     }
 
     fun disconnect(context: Context) {
@@ -176,72 +168,158 @@ object CloudFileSyncManager {
         runtime = null
         scope.launch { runCatching { active?.logout() } }
         active?.close()
-        prefs(appContext).edit().clear().apply()
-        previousDeviceId?.let { prefs(appContext).edit().putString(KEY_DEVICE_ID, it).apply() }
-        WorkManager.getInstance(appContext).cancelUniqueWork(PERIODIC_WORK)
+        prefs(appContext).edit().clear().commit()
+        previousDeviceId?.let { prefs(appContext).edit().putString(KEY_DEVICE_ID, it).commit() }
+        CloudFileSyncWorker.cancel(appContext)
     }
 
     fun requestImmediateSync(context: Context) {
         val appContext = context.applicationContext
         markLocalDirty(appContext)
-        scheduleDebouncedPush(appContext)
+        scheduleImmediatePush(appContext)
     }
 
-    suspend fun syncNow(context: Context, preferRemote: Boolean = false): String {
+    /**
+     * Requests a near-term two-way sync without declaring that local scheduler data changed.
+     * Use this for lifecycle/side-effect triggers such as notification delivery. Marking the
+     * database dirty here would incorrectly make an unrelated notification look like a local
+     * data edit and could bias conflict resolution toward an unnecessary upload.
+     */
+    fun requestSync(context: Context) {
+        val appContext = context.applicationContext
+        if (!isConfigured(appContext)) return
+        CloudFileSyncWorker.enqueueImmediate(appContext)
+    }
+
+    suspend fun syncNow(context: Context, preferRemote: Boolean = false): String =
+        executeSync(context.applicationContext, preferRemote).message
+
+    internal suspend fun syncForBackground(context: Context): CloudSyncExecutionResult =
+        executeSync(context.applicationContext, preferRemote = false)
+
+    private suspend fun executeSync(
+        context: Context,
+        preferRemote: Boolean
+    ): CloudSyncExecutionResult {
         val appContext = context.applicationContext
         return syncMutex.withLock {
+            Log.i(TAG, "sync started preferRemote=$preferRemote")
             if (!isConfigured(appContext)) {
-                return@withLock setStatus(appContext, "MEGA同期は未設定です")
+                return@withLock syncResult(
+                    appContext,
+                    CloudSyncDisposition.SUCCESS,
+                    "MEGA同期は未設定です"
+                )
             }
-            val mega = ensureRuntime(appContext)
-                ?: return@withLock lastStatus(appContext)
+            val mega = try {
+                ensureRuntime(appContext)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                return@withLock failureResult(
+                    appContext,
+                    "MEGAセッションの復元に失敗しました",
+                    error
+                )
+            }
             val preferences = prefs(appContext)
             val localDeviceId = deviceId(appContext)
 
-            val folder = runCatching { mega.ensureFolder(REMOTE_FOLDER_NAME) }.getOrElse {
-                return@withLock setStatus(appContext, "MEGA同期フォルダを開けません: ${it.userMessage()}")
+            val folder = captureSyncFailure { mega.ensureFolder(REMOTE_FOLDER_NAME) }.getOrElse {
+                return@withLock failureResult(appContext, "MEGA同期フォルダを開けません", it)
             }
-            val remoteNode = runCatching { mega.getChild(folder, REMOTE_FILE_NAME) }.getOrNull()
+            val remoteNode = captureSyncFailure {
+                mega.getChild(folder, REMOTE_FILE_NAME)
+            }.getOrElse {
+                return@withLock failureResult(
+                    appContext,
+                    "MEGA上の同期ファイルを確認できません",
+                    it
+                )
+            }
             val remoteText = if (remoteNode != null) {
-                runCatching { mega.downloadText(remoteNode) }.getOrElse {
-                    return@withLock setStatus(appContext, "MEGAから同期ファイルを取得できません: ${it.userMessage()}")
+                captureSyncFailure { mega.downloadText(remoteNode) }.getOrElse {
+                    return@withLock failureResult(
+                        appContext,
+                        "MEGAから同期ファイルを取得できません",
+                        it
+                    )
                 }
             } else {
                 null
             }
             val remote = remoteText?.let(::parseRemote)
             if (!remoteText.isNullOrBlank() && remote == null) {
-                return@withLock setStatus(appContext, "MEGA上の同期ファイル形式を読み取れません")
+                return@withLock syncResult(
+                    appContext,
+                    CloudSyncDisposition.PERMANENT_FAILURE,
+                    "MEGA上の同期ファイル形式を読み取れません"
+                )
             }
 
             val dirty = preferences.getBoolean(KEY_LOCAL_DIRTY, false)
             val dirtyAt = preferences.getLong(KEY_LOCAL_DIRTY_AT, 0L)
             val lastRemote = preferences.getLong(KEY_LAST_REMOTE_UPDATED_AT, 0L)
+            val snapshotChoice = remote?.let {
+                chooseCloudSnapshot(
+                    localDirty = dirty,
+                    localUpdatedAt = dirtyAt,
+                    remoteUpdatedAt = it.updatedAt
+                )
+            }
             val shouldPull = remote != null && remote.payload.isNotBlank() && (
                 preferRemote ||
                     (remote.updatedAt > lastRemote && remote.deviceId != localDeviceId &&
-                        (!dirty || remote.updatedAt >= dirtyAt))
+                        snapshotChoice == CloudSnapshotChoice.REMOTE)
+            )
+
+            if (remote != null && dirty && remote.deviceId != localDeviceId) {
+                Log.i(
+                    TAG,
+                    "snapshot conflict resolved choice=$snapshotChoice " +
+                        "localUpdatedAt=$dirtyAt remoteUpdatedAt=${remote.updatedAt} " +
+                        "lastRemoteUpdatedAt=$lastRemote"
                 )
+            }
 
             if (shouldPull) {
-                val imported = runCatching {
+                val imported = try {
                     applyingRemote.set(true)
-                    repository(appContext).importAllData(remote!!.payload, requireSettings = true)
-                    preferences.edit()
-                        .putLong(KEY_LAST_REMOTE_UPDATED_AT, remote.updatedAt)
-                        .putBoolean(KEY_LOCAL_DIRTY, false)
-                        .putLong(KEY_LOCAL_DIRTY_AT, 0L)
-                        .apply()
-                }.also { applyingRemote.set(false) }
-                if (imported.isFailure) {
-                    return@withLock setStatus(appContext, "MEGA同期データの適用に失敗しました")
+                    captureSyncFailure {
+                        repository(appContext).importAllData(remote.payload, requireSettings = true)
+                        val stateStored = preferences.edit()
+                            .putLong(KEY_LAST_REMOTE_UPDATED_AT, remote.updatedAt)
+                            .putBoolean(KEY_LOCAL_DIRTY, false)
+                            .putLong(KEY_LOCAL_DIRTY_AT, 0L)
+                            .commit()
+                        check(stateStored) { "同期状態を端末へ保存できませんでした" }
+                    }
+                } finally {
+                    applyingRemote.set(false)
                 }
-                return@withLock setStatus(appContext, "MEGAから同期しました")
+                if (imported.isFailure) {
+                    return@withLock syncResult(
+                        appContext,
+                        CloudSyncDisposition.PERMANENT_FAILURE,
+                        "MEGA同期データの適用に失敗しました: ${imported.exceptionOrNull().userMessage()}"
+                    )
+                }
+                return@withLock syncResult(
+                    appContext,
+                    CloudSyncDisposition.SUCCESS,
+                    "MEGAから同期しました"
+                )
             }
 
             if (remote == null || dirty) {
-                val payload = runCatching { repository(appContext).exportAllData() }.getOrElse {
-                    return@withLock setStatus(appContext, "同期データの作成に失敗しました")
+                val payload = captureSyncFailure {
+                    repository(appContext).exportAllData()
+                }.getOrElse {
+                    return@withLock syncResult(
+                        appContext,
+                        CloudSyncDisposition.PERMANENT_FAILURE,
+                        "同期データの作成に失敗しました: ${it.userMessage()}"
+                    )
                 }
                 val updatedAt = maxOf(System.currentTimeMillis(), (remote?.updatedAt ?: 0L) + 1L)
                 val envelope = JSONObject().apply {
@@ -251,60 +329,88 @@ object CloudFileSyncManager {
                     put("deviceId", localDeviceId)
                     put("payload", JSONObject(payload))
                 }.toString(2)
-                val uploaded = runCatching { mega.uploadText(folder, REMOTE_FILE_NAME, envelope) }
-                if (uploaded.isFailure) {
-                    return@withLock setStatus(appContext, "MEGAへのアップロードに失敗しました: ${uploaded.exceptionOrNull().userMessage()}")
+                val uploaded = captureSyncFailure {
+                    mega.uploadText(folder, REMOTE_FILE_NAME, envelope)
                 }
-                preferences.edit()
+                if (uploaded.isFailure) {
+                    return@withLock failureResult(
+                        appContext,
+                        "MEGAへのアップロードに失敗しました",
+                        uploaded.exceptionOrNull()
+                    )
+                }
+                val latestDirtyAt = preferences.getLong(KEY_LOCAL_DIRTY_AT, 0L)
+                val changedDuringUpload = latestDirtyAt != dirtyAt
+                val stateEditor = preferences.edit()
                     .putLong(KEY_LAST_REMOTE_UPDATED_AT, updatedAt)
-                    .putBoolean(KEY_LOCAL_DIRTY, false)
-                    .putLong(KEY_LOCAL_DIRTY_AT, 0L)
-                    .apply()
-                return@withLock setStatus(appContext, "MEGAへ同期しました")
+                if (!changedDuringUpload) {
+                    stateEditor
+                        .putBoolean(KEY_LOCAL_DIRTY, false)
+                        .putLong(KEY_LOCAL_DIRTY_AT, 0L)
+                }
+                val stateStored = stateEditor.commit()
+                if (!stateStored) {
+                    return@withLock syncResult(
+                        appContext,
+                        CloudSyncDisposition.RETRY,
+                        "MEGAへの同期後、同期状態を端末へ保存できませんでした"
+                    )
+                }
+                if (changedDuringUpload) {
+                    return@withLock syncResult(
+                        appContext,
+                        CloudSyncDisposition.RETRY,
+                        "同期中に新しい変更を検出したため再同期します"
+                    )
+                }
+                return@withLock syncResult(
+                    appContext,
+                    CloudSyncDisposition.SUCCESS,
+                    "MEGAへ同期しました"
+                )
             }
 
             if (remote.updatedAt > lastRemote) {
-                preferences.edit().putLong(KEY_LAST_REMOTE_UPDATED_AT, remote.updatedAt).apply()
+                if (!preferences.edit().putLong(KEY_LAST_REMOTE_UPDATED_AT, remote.updatedAt).commit()) {
+                    return@withLock syncResult(
+                        appContext,
+                        CloudSyncDisposition.RETRY,
+                        "同期状態を端末へ保存できませんでした"
+                    )
+                }
             }
-            setStatus(appContext, "MEGA同期済み")
+            syncResult(appContext, CloudSyncDisposition.SUCCESS, "MEGA同期済み")
         }
     }
 
-    private suspend fun ensureRuntime(context: Context): MegaRuntime? {
+    private suspend fun ensureRuntime(context: Context): MegaRuntime {
         runtime?.let { return it }
         return runtimeMutex.withLock {
             runtime?.let { return@withLock it }
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-                setStatus(context, "MEGA同期はAndroid 9以降で利用できます")
-                return@withLock null
+                throw CloudSyncPermanentException("MEGA同期はAndroid 9以降で利用できます")
             }
             if (!sdkAvailable()) {
-                setStatus(context, "MEGA SDKがアプリに組み込まれていません")
-                return@withLock null
+                throw CloudSyncPermanentException("MEGA SDKがアプリに組み込まれていません")
             }
             val session = prefs(context).getString(KEY_SESSION, null)?.takeIf { it.isNotBlank() }
-                ?: return@withLock null
-            val created = runCatching {
+                ?: throw CloudSyncPermanentException("MEGA同期は未設定です")
+            val created = captureSyncFailure {
                 MegaRuntime(context).also { api ->
                     api.fastLogin(session)
                     api.fetchNodes()
                     api.observeNodeChanges {
-                        scope.launch {
-                            delay(700)
-                            runCatching { syncNow(context) }
-                        }
+                        CloudFileSyncWorker.enqueueImmediate(context)
                     }
                 }
             }.getOrElse { error ->
-                setStatus(
-                    context,
-                    if ((error as? MegaOperationException)?.code == -15) {
-                        "MEGAセッションの有効期限が切れました。再ログインしてください"
-                    } else {
-                        "MEGAセッションの復元に失敗しました: ${error.userMessage()}"
-                    }
-                )
-                return@withLock null
+                if ((error as? MegaOperationException)?.code == -15) {
+                    throw CloudSyncPermanentException(
+                        "MEGAセッションの有効期限が切れました。再ログインしてください",
+                        error
+                    )
+                }
+                throw error
             }
             runtime = created
             created
@@ -318,7 +424,7 @@ object CloudFileSyncManager {
             override fun onInvalidated(tables: Set<String>) {
                 if (applyingRemote.get()) return
                 markLocalDirty(context)
-                scheduleDebouncedPush(context)
+                scheduleImmediatePush(context)
             }
         }
         db.invalidationTracker.addObserver(observer)
@@ -327,34 +433,19 @@ object CloudFileSyncManager {
 
     private fun markLocalDirty(context: Context) {
         if (!isConfigured(context)) return
-        prefs(context).edit()
+        val preferences = prefs(context)
+        val previousDirtyAt = preferences.getLong(KEY_LOCAL_DIRTY_AT, 0L)
+        val dirtyAt = nextCloudDirtyTimestamp(System.currentTimeMillis(), previousDirtyAt)
+        val stored = preferences.edit()
             .putBoolean(KEY_LOCAL_DIRTY, true)
-            .putLong(KEY_LOCAL_DIRTY_AT, System.currentTimeMillis())
-            .apply()
+            .putLong(KEY_LOCAL_DIRTY_AT, dirtyAt)
+            .commit()
+        if (!stored) Log.w(TAG, "local dirty state could not be persisted")
     }
 
-    private fun scheduleDebouncedPush(context: Context) {
+    private fun scheduleImmediatePush(context: Context) {
         if (!isConfigured(context)) return
-        pushJob?.cancel()
-        pushJob = scope.launch {
-            delay(900)
-            runCatching { syncNow(context) }
-        }
-    }
-
-    private fun schedulePeriodic(context: Context) {
-        val request = PeriodicWorkRequestBuilder<CloudFileSyncWorker>(15, TimeUnit.MINUTES)
-            .setConstraints(
-                Constraints.Builder()
-                    .setRequiredNetworkType(NetworkType.CONNECTED)
-                    .build()
-            )
-            .build()
-        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-            PERIODIC_WORK,
-            ExistingPeriodicWorkPolicy.KEEP,
-            request
-        )
+        CloudFileSyncWorker.enqueueImmediate(context)
     }
 
     private fun parseRemote(text: String): RemoteSnapshot? = runCatching {
@@ -383,12 +474,49 @@ object CloudFileSyncManager {
     private fun deviceId(context: Context): String {
         val preferences = prefs(context)
         return preferences.getString(KEY_DEVICE_ID, null) ?: UUID.randomUUID().toString().also {
-            preferences.edit().putString(KEY_DEVICE_ID, it).apply()
+            check(preferences.edit().putString(KEY_DEVICE_ID, it).commit()) {
+                "MEGA同期の端末IDを保存できませんでした"
+            }
         }
     }
 
+    private fun failureResult(
+        context: Context,
+        prefix: String,
+        error: Throwable?
+    ): CloudSyncExecutionResult {
+        val unwrapped = error.unwrapReflectionException()
+        val disposition = when (unwrapped) {
+            is CloudSyncPermanentException -> CloudSyncDisposition.PERMANENT_FAILURE
+            is MegaOperationException -> cloudSyncDispositionForMegaError(unwrapped.code)
+            else -> CloudSyncDisposition.RETRY
+        }
+        val message = if (unwrapped is CloudSyncPermanentException) {
+            unwrapped.message.orEmpty().ifBlank { prefix }
+        } else {
+            "$prefix: ${unwrapped.userMessage()}"
+        }
+        return syncResult(context, disposition, message)
+    }
+
+    private fun syncResult(
+        context: Context,
+        disposition: CloudSyncDisposition,
+        message: String
+    ): CloudSyncExecutionResult {
+        setStatus(context, message)
+        if (disposition == CloudSyncDisposition.SUCCESS) {
+            Log.i(TAG, "sync completed disposition=$disposition message=$message")
+        } else {
+            Log.w(TAG, "sync completed disposition=$disposition message=$message")
+        }
+        return CloudSyncExecutionResult(disposition, message)
+    }
+
     private fun setStatus(context: Context, value: String): String {
-        prefs(context).edit().putString(KEY_LAST_STATUS, value).apply()
+        if (!prefs(context).edit().putString(KEY_LAST_STATUS, value).commit()) {
+            Log.w(TAG, "sync status could not be persisted")
+        }
         return value
     }
 
@@ -617,6 +745,29 @@ private class MegaOperationException(
     message: String
 ) : IllegalStateException(message)
 
+private class CloudSyncPermanentException(
+    message: String,
+    cause: Throwable? = null
+) : IllegalStateException(message, cause)
+
+private suspend inline fun <T> captureSyncFailure(
+    crossinline block: suspend () -> T
+): Result<T> = try {
+    Result.success(block())
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (error: Throwable) {
+    Result.failure(error)
+}
+
+private fun Throwable?.unwrapReflectionException(): Throwable? {
+    var current = this
+    while (current is java.lang.reflect.InvocationTargetException && current.targetException != null) {
+        current = current.targetException
+    }
+    return current
+}
+
 private fun defaultReturn(type: Class<*>): Any? = when (type) {
     java.lang.Boolean.TYPE -> false
     java.lang.Byte.TYPE -> 0.toByte()
@@ -631,6 +782,6 @@ private fun defaultReturn(type: Class<*>): Any? = when (type) {
 
 private fun Throwable?.userMessage(): String {
     if (this == null) return "不明なエラー"
-    val target = (this as? java.lang.reflect.InvocationTargetException)?.targetException ?: this
+    val target = unwrapReflectionException() ?: this
     return target.message?.takeIf { it.isNotBlank() } ?: target.javaClass.simpleName
 }
