@@ -50,6 +50,7 @@ import jp.linkserver.nittcsc.ui.components.AppLoadingIndicator
 import jp.linkserver.nittcsc.update.AppUpdateInfo
 import jp.linkserver.nittcsc.update.checkGitHubReleaseUpdate
 import jp.linkserver.nittcsc.update.detectReleaseChannel
+import jp.linkserver.nittcsc.update.isIntDevBuild
 import jp.linkserver.nittcsc.update.isShowLatestReleaseForTestingEnabled
 import jp.linkserver.nittcsc.update.markUpdateCheckFinished
 import jp.linkserver.nittcsc.update.resolveUpdateCurrentVersionForTesting
@@ -70,6 +71,7 @@ fun AboutScreen(
     val (versionName, versionCode) = remember { resolveAppVersionInfo(context) }
     val (simpleVersion, _) = remember { splitVersionAndChannel(versionName) }
     val normalizedChannelName = remember(versionName) { detectReleaseChannel(versionName) }
+    val isIntDev = remember(versionName) { isIntDevBuild(versionName) }
     val repositoryUrl = stringResource(R.string.about_support_site_url)
 
     val channelLabel = when {
@@ -306,8 +308,9 @@ fun AboutScreen(
                 }
             }
 
-            // リリースビルドでも通知経路を端末上で診断できるよう常時表示する。
-            NotificationDebugSettingsContent()
+            if (isIntDev) {
+                NotificationDebugSettingsContent()
+            }
 
             // ── オープンソースライセンス ──────────────────────────────
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
