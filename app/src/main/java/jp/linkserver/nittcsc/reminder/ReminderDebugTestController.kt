@@ -177,6 +177,14 @@ class ReminderDebugAlarmReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
+                // Exact-alarm notifications must be emitted from the receiver path itself.
+                // WorkManager is a persistence/fallback check and is not guaranteed to run
+                // immediately, especially under background restrictions or quota pressure.
+                val posted = ReminderDebugTestController.postAlarmNotification(
+                    context.applicationContext
+                )
+                ReminderDebug.log("debug alarm receiver direct notification posted=$posted")
+
                 val operation = ReminderDebugTestController.enqueueDebugWorker(context.applicationContext)
                 operation.result.get()
                 ReminderDebug.log("debug worker enqueue persisted")
