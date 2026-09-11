@@ -60,7 +60,6 @@ internal fun LessonStartNotificationSettingsContent(
     progressCountsDown: Boolean,
     liveUpdateEarlyMinutes: Int,
     chipMode: LessonStartNotificationChipMode,
-    minutesBefore: String,
     exclusions: List<LessonNotificationExclusionEntity>,
     subjectSuggestions: List<String>,
     subjectTeacherCandidates: Map<String, List<String>>,
@@ -71,7 +70,6 @@ internal fun LessonStartNotificationSettingsContent(
     onToggleProgressCountsDown: (Boolean) -> Unit,
     onUpdateLiveUpdateEarlyMinutes: (Int) -> Unit,
     onUpdateChipMode: (LessonStartNotificationChipMode) -> Unit,
-    onMinutesBeforeChange: (String) -> Unit,
     onAddExclusion: (String, String?, Boolean) -> Unit,
     onDeleteExclusion: (LessonNotificationExclusionEntity) -> Unit
 ) {
@@ -129,15 +127,6 @@ internal fun LessonStartNotificationSettingsContent(
                             sectionContent()
                         }
                 }) {
-                    item("label_lesson_start_notification_minutes", contentPadding = PaddingValues(20.dp)) {
-                        NumberSettingRow(
-                            label = stringResource(R.string.label_lesson_start_notification_minutes),
-                            value = minutesBefore,
-                            unit = stringResource(R.string.unit_minutes_before),
-                            onValueChange = { onMinutesBeforeChange(it.filter { c -> c.isDigit() }.take(3)) }
-                        )
-                    }
-
                     if (!notificationsEnabled) {
                         item("warning_notifications_disabled", contentPadding = PaddingValues(20.dp)) {
                             Surface(

@@ -69,7 +69,7 @@ internal data class NextLessonSnapshot(
     val start: LocalTime
 )
 
-private data class AdditionalTriggerSpec(
+internal data class AdditionalTriggerSpec(
     val key: String,
     val moment: AdditionalNotificationMoment,
     val index: Int,
@@ -105,79 +105,13 @@ class AdditionalLessonNotificationWorker(
         val triggerKey = inputData.getString(KEY_TRIGGER).orEmpty()
         if (slotIndex < 0 || triggerKey.isBlank()) return Result.success()
 
-        val snapshot = loadSnapshot(applicationContext) ?: return Result.success()
-        if (!snapshot.settings.lessonStartNotificationEnabled) return Result.success()
-        val spec = triggerSpecs(snapshot.settings).firstOrNull { it.key == triggerKey }
-            ?: return Result.success()
-        if (!spec.trigger.enabled) return Result.success()
-        val entry = entriesForDate(date, snapshot).firstOrNull { it.slot.index == slotIndex }
-            ?: return Result.success()
-        if (entry.lesson.subject.isBlank() || isExcludedAdditional(entry.lesson, snapshot.exclusions)) {
-            return Result.success()
-        }
-
-        val target = LocalDateTime.of(
-            date,
-            if (spec.moment == AdditionalNotificationMoment.START) entry.slot.start else entry.slot.end
-        )
-        val notificationAt = target.minusMinutes(spec.trigger.minutesBefore.coerceIn(0, 360).toLong())
-        val waitMillis = Duration.between(LocalDateTime.now(ZoneId.systemDefault()), notificationAt).toMillis()
-        if (waitMillis > 0L) delay(waitMillis)
-        if (Duration.between(LocalDateTime.now(ZoneId.systemDefault()), target).toMillis() < -60_000L) {
-            return Result.success()
-        }
-
-        val next = findNextLesson(applicationContext, date, slotIndex)
-        val values = templateValues(entry, spec.trigger.minutesBefore, next)
-        val config = snapshot.settings.lessonNotificationCustomization()
-        val titleTemplate = if (spec.moment == AdditionalNotificationMoment.START) {
-            config.startTitleTemplate
-        } else {
-            config.endTitleTemplate
-        }
-        val bodyTemplate = if (spec.moment == AdditionalNotificationMoment.START) {
-            config.startBodyTemplate
-        } else {
-            config.endBodyTemplate
-        }
-        val title = renderLessonNotificationTemplate(titleTemplate, values).ifBlank {
-            if (spec.moment == AdditionalNotificationMoment.START) "授業開始前通知" else "授業終了前通知"
-        }
-        val body = renderLessonNotificationTemplate(bodyTemplate, values).ifBlank {
-            if (spec.moment == AdditionalNotificationMoment.START) {
-                "あと${spec.trigger.minutesBefore}分で${entry.lesson.subject}が始まります。"
-            } else {
-                "あと${spec.trigger.minutesBefore}分で${entry.lesson.subject}が終わります。"
-            }
-        }
-
-        createNotificationChannel(applicationContext)
-        val notificationId = notificationId(date, slotIndex, spec.ordinal)
-        val pendingIntent = PendingIntent.getActivity(
+        deliverAdditionalNotification(
             applicationContext,
-            notificationId,
-            Intent(applicationContext, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            date,
+            slotIndex,
+            triggerKey,
+            waitForScheduledTime = true
         )
-        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification_school)
-            .setContentTitle(title)
-            .setContentText(body.lineSequence().firstOrNull().orEmpty())
-            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setAutoCancel(true)
-            .setContentIntent(pendingIntent)
-            .build()
-        try {
-            NotificationManagerCompat.from(applicationContext).notify(notificationId, notification)
-            CloudFileSyncManager.requestSync(applicationContext)
-        } catch (_: SecurityException) {
-            // Notification permission may be revoked independently.
-        }
         return Result.success()
     }
 
@@ -259,6 +193,19 @@ class AdditionalLessonNotificationWorker(
             )
         }
 
+        suspend fun deliverAlarmNotification(
+            context: Context,
+            date: LocalDate,
+            slotIndex: Int,
+            triggerKey: String
+        ): Boolean = deliverAdditionalNotification(
+            context.applicationContext,
+            date,
+            slotIndex,
+            triggerKey,
+            waitForScheduledTime = false
+        )
+
         internal suspend fun findNextLesson(
             context: Context,
             date: LocalDate,
@@ -282,7 +229,7 @@ class AdditionalLessonNotificationWorker(
             return null
         }
 
-        private fun triggerSpecs(settings: SettingsEntity): List<AdditionalTriggerSpec> {
+        internal fun triggerSpecs(settings: SettingsEntity): List<AdditionalTriggerSpec> {
             val config = settings.lessonNotificationCustomization()
             return listOfNotNull(
                 config.startTriggers.getOrNull(1)?.let {
@@ -368,10 +315,112 @@ class AdditionalLessonNotificationWorker(
         private fun uniqueWorkName(date: LocalDate, slotIndex: Int, triggerKey: String) =
             "additional_lesson_notification_${date}_${slotIndex}_$triggerKey"
 
-        private fun notificationId(date: LocalDate, slotIndex: Int, ordinal: Int): Int =
+        internal fun notificationId(date: LocalDate, slotIndex: Int, ordinal: Int): Int =
             (150_000 + (date.toEpochDay() % 10_000).toInt() * 50 + slotIndex * 4 + ordinal)
                 .coerceAtLeast(150_000)
     }
+}
+
+private suspend fun deliverAdditionalNotification(
+    context: Context,
+    date: LocalDate,
+    slotIndex: Int,
+    triggerKey: String,
+    waitForScheduledTime: Boolean
+): Boolean {
+    val snapshot = loadSnapshot(context) ?: return false
+    if (!snapshot.settings.lessonStartNotificationEnabled) return false
+    val spec = AdditionalLessonNotificationWorker.triggerSpecs(snapshot.settings)
+        .firstOrNull { it.key == triggerKey } ?: return false
+    if (!spec.trigger.enabled) return false
+    val entry = entriesForDate(date, snapshot).firstOrNull { it.slot.index == slotIndex }
+        ?: return false
+    if (entry.lesson.subject.isBlank() || isExcludedAdditional(entry.lesson, snapshot.exclusions)) {
+        return false
+    }
+
+    val target = LocalDateTime.of(
+        date,
+        if (spec.moment == AdditionalNotificationMoment.START) entry.slot.start else entry.slot.end
+    )
+    val notificationAt = target.minusMinutes(spec.trigger.minutesBefore.coerceIn(0, 360).toLong())
+    if (waitForScheduledTime) {
+        val waitMillis = Duration.between(
+            LocalDateTime.now(ZoneId.systemDefault()),
+            notificationAt
+        ).toMillis()
+        if (waitMillis > 0L) delay(waitMillis)
+    }
+    val remainingMillis = Duration.between(
+        LocalDateTime.now(ZoneId.systemDefault()),
+        target
+    ).toMillis()
+    if (remainingMillis < -60_000L) {
+        ReminderDebug.log(
+            "additional lesson delivery skipped date=$date slotIndex=$slotIndex " +
+                "triggerKey=$triggerKey reason=past_grace remainingMillis=$remainingMillis"
+        )
+        return false
+    }
+
+    val next = AdditionalLessonNotificationWorker.findNextLesson(context, date, slotIndex)
+    val values = templateValues(entry, spec.trigger.minutesBefore, next)
+    val config = snapshot.settings.lessonNotificationCustomization()
+    val titleTemplate = if (spec.moment == AdditionalNotificationMoment.START) {
+        config.startTitleTemplate
+    } else {
+        config.endTitleTemplate
+    }
+    val bodyTemplate = if (spec.moment == AdditionalNotificationMoment.START) {
+        config.startBodyTemplate
+    } else {
+        config.endBodyTemplate
+    }
+    val title = renderLessonNotificationTemplate(titleTemplate, values).ifBlank {
+        if (spec.moment == AdditionalNotificationMoment.START) "授業開始前通知" else "授業終了前通知"
+    }
+    val body = renderLessonNotificationTemplate(bodyTemplate, values).ifBlank {
+        if (spec.moment == AdditionalNotificationMoment.START) {
+            "あと${spec.trigger.minutesBefore}分で${entry.lesson.subject}が始まります。"
+        } else {
+            "あと${spec.trigger.minutesBefore}分で${entry.lesson.subject}が終わります。"
+        }
+    }
+
+    createNotificationChannel(context)
+    val notificationId = AdditionalLessonNotificationWorker.notificationId(
+        date,
+        slotIndex,
+        spec.ordinal
+    )
+    val pendingIntent = PendingIntent.getActivity(
+        context,
+        notificationId,
+        Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        },
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+    val notification = NotificationCompat.Builder(context, CHANNEL_ID_SHARED)
+        .setSmallIcon(R.drawable.ic_notification_school)
+        .setContentTitle(title)
+        .setContentText(body.lineSequence().firstOrNull().orEmpty())
+        .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+        .setPriority(NotificationCompat.PRIORITY_HIGH)
+        .setCategory(NotificationCompat.CATEGORY_ALARM)
+        .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+        .setOnlyAlertOnce(true)
+        .setAutoCancel(true)
+        .setContentIntent(pendingIntent)
+        .build()
+    val posted = NotificationManagerCompat.from(context)
+        .notifyIfAllowed(context, notificationId, notification)
+    if (posted) CloudFileSyncManager.requestSync(context)
+    ReminderDebug.log(
+        "additional lesson delivery finished date=$date slotIndex=$slotIndex " +
+            "triggerKey=$triggerKey direct=${!waitForScheduledTime} posted=$posted"
+    )
+    return posted
 }
 
 private suspend fun loadSnapshot(context: Context): NotificationScheduleSnapshot? {

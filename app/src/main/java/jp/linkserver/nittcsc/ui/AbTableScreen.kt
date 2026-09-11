@@ -34,6 +34,8 @@ import androidx.compose.ui.unit.dp
 import jp.linkserver.nittcsc.R
 import jp.linkserver.nittcsc.data.DayType
 import jp.linkserver.nittcsc.data.DayTypeEntity
+import jp.linkserver.nittcsc.logic.lessonWeekDates
+import jp.linkserver.nittcsc.logic.lessonWeekdays
 import jp.linkserver.nittcsc.data.HolidaySpecialLabel
 import jp.linkserver.nittcsc.data.LongBreakEntity
 import jp.linkserver.nittcsc.viewmodel.SchedulerUiState
@@ -89,9 +91,9 @@ internal fun AbTableScreen(
     val currentPeriodEnd = remember(settings.termEnd, nextAcademicYearStart) {
         nextAcademicYearStart?.let { minOf(settings.termEnd, it.minusDays(1)) } ?: settings.termEnd
     }
-    val weeks = remember(settings.termStart, currentPeriodEnd) {
+    val weeks = remember(settings.termStart, currentPeriodEnd, settings.enableSaturdayClasses) {
         if (settings.termStart <= currentPeriodEnd) {
-            buildWeekRows(settings.termStart, currentPeriodEnd)
+            buildWeekRows(settings.termStart, currentPeriodEnd, settings.enableSaturdayClasses)
         } else {
             emptyList()
         }
@@ -102,9 +104,13 @@ internal fun AbTableScreen(
         currentWeeks.map { DisplayWeekRow(it, false, AbTableSection.CURRENT) } +
             pastWeeks.map { DisplayWeekRow(it, true, AbTableSection.CURRENT) }
     }
-    val nextAcademicYearDisplayedWeeks = remember(nextAcademicYearStart, nextAcademicYearEnd) {
+    val nextAcademicYearDisplayedWeeks = remember(
+        nextAcademicYearStart,
+        nextAcademicYearEnd,
+        settings.enableSaturdayClasses
+    ) {
         if (nextAcademicYearStart != null && nextAcademicYearEnd != null) {
-            buildWeekRows(nextAcademicYearStart, nextAcademicYearEnd).map {
+            buildWeekRows(nextAcademicYearStart, nextAcademicYearEnd, settings.enableSaturdayClasses).map {
                 DisplayWeekRow(it, false, AbTableSection.NEXT_ACADEMIC_YEAR)
             }
         } else {
@@ -243,7 +249,7 @@ internal fun AbTableScreen(
                 }
             )
         }
-        item { WeekHeader() }
+        item { WeekHeader(settings.enableSaturdayClasses) }
         items(
             displayedWeeks,
             key = { "${it.section.name}-${it.row.weekStart}" }
@@ -264,7 +270,7 @@ internal fun AbTableScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (isFirstNextAcademicYearWeek) {
                         NextAcademicYearHeader(checkNotNull(preparedNextAcademicYear))
-                        WeekHeader()
+                        WeekHeader(settings.enableSaturdayClasses)
                     }
                     WeekRow(
                         abEnabled = settings.enableAbTimetable,
@@ -393,6 +399,7 @@ internal fun AbTableScreen(
             currentOverrideDayOfWeek = dayTypeEntity?.overrideLessonDayOfWeek,
             currentOverrideDayType = dayTypeEntity?.overrideLessonDayType,
             currentHolidaySpecialLabel = dayTypeEntity?.holidaySpecialLabel,
+            saturdayClassesEnabled = settings.enableSaturdayClasses,
             showDayTypeSelector = false,
             onDismiss = { overrideEditingDate = null },
             onApply = { dayOfWeek, dayType, holidayLabel ->
@@ -508,7 +515,7 @@ private fun DayChip(label: String, visual: DayTypeVisual) {
 }
 
 @Composable
-private fun WeekHeader() {
+private fun WeekHeader(saturdayClassesEnabled: Boolean) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         shape = RoundedCornerShape(16.dp),
@@ -527,15 +534,9 @@ private fun WeekHeader() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelLarge
             )
-            listOf(
-                R.string.weekday_monday,
-                R.string.weekday_tuesday,
-                R.string.weekday_wednesday,
-                R.string.weekday_thursday,
-                R.string.weekday_friday
-            ).forEach { dayRes ->
+            lessonWeekdays(saturdayClassesEnabled).forEach { dayOfWeek ->
                 Text(
-                    text = stringResource(dayRes),
+                    text = stringResource(dayOfWeekRes(dayOfWeek)),
                     modifier = Modifier.weight(1f),
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -779,14 +780,22 @@ private data class DisplayWeekRow(
     val section: AbTableSection
 )
 
-private fun buildWeekRows(startDate: LocalDate, endDate: LocalDate): List<WeekRow> {
+private fun buildWeekRows(
+    startDate: LocalDate,
+    endDate: LocalDate,
+    saturdayClassesEnabled: Boolean
+): List<WeekRow> {
     val firstMonday = startDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-    val lastFriday = endDate.with(TemporalAdjusters.nextOrSame(DayOfWeek.FRIDAY))
+    val lastSchoolDay = endDate.with(
+        TemporalAdjusters.nextOrSame(
+            if (saturdayClassesEnabled) DayOfWeek.SATURDAY else DayOfWeek.FRIDAY
+        )
+    )
 
     val rows = mutableListOf<WeekRow>()
     var cursor = firstMonday
-    while (!cursor.isAfter(lastFriday)) {
-        val days = (0L..4L).map { cursor.plusDays(it) }
+    while (!cursor.isAfter(lastSchoolDay)) {
+        val days = lessonWeekDates(cursor, saturdayClassesEnabled)
         rows += WeekRow(weekStart = days.first(), weekEnd = days.last(), days = days)
         cursor = cursor.plusWeeks(1)
     }

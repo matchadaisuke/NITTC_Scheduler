@@ -152,7 +152,6 @@ fun SettingsScreen(
     subjectSuggestions: List<String> = emptyList(),
     subjectTeacherCandidates: Map<String, List<String>> = emptyMap(),
     onToggleLessonStartNotifications: (Boolean) -> Unit = {},
-    onUpdateLessonStartNotificationMinutesBefore: (Int) -> Unit = {},
     onToggleLessonStartNotificationLiveUpdates: (Boolean) -> Unit = {},
     onToggleLessonStartNotificationProgressCountsDown: (Boolean) -> Unit = {},
     onUpdateLessonStartNotificationLiveUpdateEarlyMinutes: (Int) -> Unit = {},
@@ -241,9 +240,6 @@ fun SettingsScreen(
     var arrivalMinute by remember(s) { mutableStateOf(if ((s?.arrivalMinute ?: -1) >= 0) s!!.arrivalMinute.toString().padStart(2,'0') else "") }
     var departureHour by remember(s) { mutableStateOf(if ((s?.departureHour ?: -1) >= 0) s!!.departureHour.toString() else "") }
     var departureMinute by remember(s) { mutableStateOf(if ((s?.departureMinute ?: -1) >= 0) s!!.departureMinute.toString().padStart(2,'0') else "") }
-    var lessonStartNotificationMinutesBefore by remember(s?.lessonStartNotificationMinutesBefore) {
-        mutableStateOf((s?.lessonStartNotificationMinutesBefore ?: 10).toString())
-    }
     var examPeriodsPerDay by remember(s?.examPeriodsPerDay) {
         mutableStateOf((s?.examPeriodsPerDay ?: 4).toString())
     }
@@ -543,14 +539,6 @@ fun SettingsScreen(
 
         if (changed) {
             onUpdateScheduleSettings(p, d, b, l, la, h, m, periodLabelStyle, ah, am, dh, dm)
-        }
-    }
-
-    LaunchedEffect(lessonStartNotificationMinutesBefore, s?.lessonStartNotificationMinutesBefore) {
-        delay(500)
-        val minutes = lessonStartNotificationMinutesBefore.toIntOrNull()?.coerceIn(0, 360) ?: return@LaunchedEffect
-        if (minutes != (s?.lessonStartNotificationMinutesBefore ?: 10)) {
-            onUpdateLessonStartNotificationMinutesBefore(minutes)
         }
     }
 
@@ -1338,7 +1326,6 @@ fun SettingsScreen(
                 progressCountsDown = enabledLessonStartProgressCountsDown,
                 liveUpdateEarlyMinutes = lessonStartLiveUpdateEarlyMinutes,
                 chipMode = lessonStartChipMode,
-                minutesBefore = lessonStartNotificationMinutesBefore,
                 exclusions = state.lessonNotificationExclusions,
                 subjectSuggestions = subjectSuggestions,
                 subjectTeacherCandidates = subjectTeacherCandidates,
@@ -1362,14 +1349,15 @@ fun SettingsScreen(
                 onToggleProgressCountsDown = onToggleLessonStartNotificationProgressCountsDown,
                 onUpdateLiveUpdateEarlyMinutes = onUpdateLessonStartNotificationLiveUpdateEarlyMinutes,
                 onUpdateChipMode = onUpdateLessonStartNotificationChipMode,
-                onMinutesBeforeChange = { lessonStartNotificationMinutesBefore = it },
                 onAddExclusion = onAddLessonNotificationExclusion,
                 onDeleteExclusion = onDeleteLessonNotificationExclusion
             )
-            CustomizationNotificationSettingsContent(
-                settings = s,
-                onUpdate = onUpdateLessonNotificationCustomization
-            )
+            if (enabledLessonStartNotifications) {
+                CustomizationNotificationSettingsContent(
+                    settings = s,
+                    onUpdate = onUpdateLessonNotificationCustomization
+                )
+            }
         }
 
         // ── 表示設定 ──────────────────────────────────────────

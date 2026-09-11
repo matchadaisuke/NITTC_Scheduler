@@ -546,8 +546,12 @@
     <string name="dialog_expressive_warning_body">Material 3 Expressiveは試験運用中です。一部の画面やアニメーションが変更され、将来の更新でデザインが変わる場合があります。</string>
     <string name="section_task_plan_settings">カレンダー連携</string>
     <string name="section_notification_settings">通知設定</string>
-    <string name="label_lesson_start_notification">授業前に通知</string>
-    <string name="desc_lesson_start_notification">授業開始の前に、アプリから通知を送ります</string>
+    <string name="label_lesson_start_notification">授業通知をオン</string>
+    <string name="desc_lesson_start_notification">授業の開始前・終了前通知をまとめて有効にします</string>
+    <string name="label_lesson_notification_children">通知ごとの設定</string>
+    <string name="label_lesson_notification_start_child">開始前 %1$d</string>
+    <string name="label_lesson_notification_end_child">終了前 %1$d</string>
+    <string name="unit_minutes_short">分</string>
     <string name="label_lesson_start_live_updates">残り時間を表示</string>
     <string name="desc_lesson_start_live_updates">Live Updatesで授業開始までの残り時間を表示します</string>
     <string name="desc_lesson_start_live_updates_unavailable">この機能はAndroid 16以降でのみ利用できます</string>

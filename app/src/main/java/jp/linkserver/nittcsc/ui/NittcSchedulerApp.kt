@@ -211,6 +211,8 @@ import jp.linkserver.nittcsc.logic.formatExamPeriodLabel
 import jp.linkserver.nittcsc.logic.forExamTimetable
 import jp.linkserver.nittcsc.logic.generateClassSlots
 import jp.linkserver.nittcsc.logic.japaneseDayOfWeekSearchText
+import jp.linkserver.nittcsc.logic.lessonWeekDates
+import jp.linkserver.nittcsc.logic.lessonWeekdays
 import jp.linkserver.nittcsc.logic.matchesTaskPlanSearch
 import jp.linkserver.nittcsc.logic.normalizeSearchText
 import jp.linkserver.nittcsc.logic.planMatchesLesson
@@ -2016,7 +2018,6 @@ private fun NittcSchedulerContent(viewModel: SchedulerViewModel, startOnTimetabl
                     subjectSuggestions = settingsSubjectSuggestions,
                     subjectTeacherCandidates = settingsTeacherCandidates,
                     onToggleLessonStartNotifications = viewModel::toggleLessonStartNotifications,
-                    onUpdateLessonStartNotificationMinutesBefore = viewModel::updateLessonStartNotificationMinutesBefore,
                     onToggleLessonStartNotificationLiveUpdates = viewModel::toggleLessonStartNotificationLiveUpdates,
                     onToggleLessonStartNotificationProgressCountsDown = viewModel::toggleLessonStartNotificationProgressCountsDown,
                     onUpdateLessonStartNotificationLiveUpdateEarlyMinutes = viewModel::updateLessonStartNotificationLiveUpdateEarlyMinutes,
@@ -3179,15 +3180,8 @@ private fun TimetableInputScreen(
     onAutoSaveLesson: (Int, TimetableTerm, Int, Int, LessonDraft) -> Unit,
     onSaveLesson: (Int, TimetableTerm, Int, Int, LessonDraft) -> Unit
 ) {
-    val dayLabels = buildList {
-        add(DayOfWeek.MONDAY.value to R.string.weekday_monday)
-        add(DayOfWeek.TUESDAY.value to R.string.weekday_tuesday)
-        add(DayOfWeek.WEDNESDAY.value to R.string.weekday_wednesday)
-        add(DayOfWeek.THURSDAY.value to R.string.weekday_thursday)
-        add(DayOfWeek.FRIDAY.value to R.string.weekday_friday)
-        if (state.settings?.enableSaturdayClasses == true) {
-            add(DayOfWeek.SATURDAY.value to R.string.weekday_saturday)
-        }
+    val dayLabels = lessonWeekdays(state.settings?.enableSaturdayClasses == true).map { dayOfWeek ->
+        dayOfWeek.value to dayOfWeekRes(dayOfWeek)
     }
     val dayButtonLabels = dayLabels.map { (_, labelRes) -> stringResource(labelRes) }
 
@@ -3617,7 +3611,9 @@ private fun OutputScreen(
     }
     val dayType = dayTypeForDate(selectedDate)
     val weekStart = weekDisplayReferenceDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-    val weekDates = remember(weekDisplayReferenceDate, saturdayClassesEnabled) { (0L..if (saturdayClassesEnabled) 5L else 4L).map { weekStart.plusDays(it) } }
+    val weekDates = remember(weekDisplayReferenceDate, saturdayClassesEnabled) {
+        lessonWeekDates(weekStart, saturdayClassesEnabled)
+    }
     val tasksByDueDate = remember(state.tasks) { state.tasks.groupBy { it.dueDate } }
     val plansByDueDate = remember(state.plans) { state.plans.groupBy { it.dueDate } }
     val isCurrentRangeToday = remember(displayMode, selectedDate, weekDates, today) {
@@ -4085,7 +4081,7 @@ private fun OutputScreen(
                         } else {
                             val pageWeekStart = pageDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
                             val pageWeekDates = remember(pageDate, saturdayClassesEnabled) {
-                                (0L..if (saturdayClassesEnabled) 5L else 4L).map { pageWeekStart.plusDays(it) }
+                                lessonWeekDates(pageWeekStart, saturdayClassesEnabled)
                             }
                             val pageWeekSlotsByDate = remember(
                                 pageWeekDates,
@@ -4121,6 +4117,7 @@ private fun OutputScreen(
                             }
                             WeekScheduleTable(
                                 dates = pageWeekDates,
+                                saturdayClassesEnabled = saturdayClassesEnabled,
                                 dayTypeForDate = dayTypeForDate,
                                 dayTypeEntityForDate = dayTypeEntityForDate,
                                 resolveLesson = resolveLesson,
@@ -7173,6 +7170,7 @@ private fun WeekendCurrentDayMarker(
 @Composable
 private fun WeekScheduleTable(
     dates: List<LocalDate>,
+    saturdayClassesEnabled: Boolean,
     dayTypeForDate: (LocalDate) -> DayType,
     dayTypeEntityForDate: (LocalDate) -> DayTypeEntity?,
     resolveLesson: (LocalDate, Int) -> ResolvedLesson?,
@@ -7686,6 +7684,7 @@ private fun WeekScheduleTable(
             currentOverrideDayOfWeek = dayTypeEntity?.overrideLessonDayOfWeek,
             currentOverrideDayType = dayTypeEntity?.overrideLessonDayType,
             currentHolidaySpecialLabel = dayTypeEntity?.holidaySpecialLabel,
+            saturdayClassesEnabled = saturdayClassesEnabled,
             onDismiss = { overrideEditingDate = null },
             onApply = { dayOfWeek, dayTypeValue, _ ->
                 if (dayOfWeek == null) {
@@ -8266,6 +8265,7 @@ internal fun LessonOverrideDialog(
     currentOverrideDayOfWeek: Int?,
     currentOverrideDayType: DayType?,
     currentHolidaySpecialLabel: HolidaySpecialLabel?,
+    saturdayClassesEnabled: Boolean,
     showDayTypeSelector: Boolean = true,
     onDismiss: () -> Unit,
     onApply: (Int?, DayType, HolidaySpecialLabel?) -> Unit
@@ -8300,8 +8300,8 @@ internal fun LessonOverrideDialog(
         )
     }
 
-    val weekdayOptions = remember {
-        listOf(DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY, DayOfWeek.SATURDAY)
+    val weekdayOptions = remember(saturdayClassesEnabled) {
+        lessonWeekdays(saturdayClassesEnabled)
     }
     val appliedDayType = if (effectiveShowDayTypeSelector) selectedDayType else currentDayType
     val holidayLabelOptions = remember {
@@ -8643,7 +8643,7 @@ private enum class HolidayDialogMode {
 }
 
 @StringRes
-private fun dayOfWeekRes(dayOfWeek: DayOfWeek): Int = when (dayOfWeek) {
+internal fun dayOfWeekRes(dayOfWeek: DayOfWeek): Int = when (dayOfWeek) {
     DayOfWeek.MONDAY -> R.string.weekday_monday
     DayOfWeek.TUESDAY -> R.string.weekday_tuesday
     DayOfWeek.WEDNESDAY -> R.string.weekday_wednesday

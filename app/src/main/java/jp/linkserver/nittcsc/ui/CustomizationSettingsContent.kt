@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
@@ -16,16 +17,23 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import jp.linkserver.nittcsc.R
 import jp.linkserver.nittcsc.data.LessonNotificationCustomization
@@ -127,21 +135,24 @@ internal fun CustomizationNotificationSettingsContent(
     settings ?: return
     val config = settings.lessonNotificationCustomization()
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp)
+    ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text("通知タイミングと本文", style = MaterialTheme.typography.titleMedium)
             Text(
-                "授業開始前2件・終了前2件を個別にオン/オフできます。開始前1は上の既存設定と連動します。",
-                style = MaterialTheme.typography.bodySmall,
+                text = stringResource(R.string.label_lesson_notification_children),
+                style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             config.startTriggers.take(2).forEachIndexed { index, trigger ->
                 NotificationTriggerEditor(
-                    title = "授業開始前 ${index + 1}",
+                    title = stringResource(R.string.label_lesson_notification_start_child, index + 1),
                     trigger = trigger,
                     onChange = { changed ->
                         val values = config.startTriggers.toMutableList().also { it[index] = changed }
@@ -151,7 +162,7 @@ internal fun CustomizationNotificationSettingsContent(
             }
             config.endTriggers.take(2).forEachIndexed { index, trigger ->
                 NotificationTriggerEditor(
-                    title = "授業終了前 ${index + 1}",
+                    title = stringResource(R.string.label_lesson_notification_end_child, index + 1),
                     trigger = trigger,
                     onChange = { changed ->
                         val values = config.endTriggers.toMutableList().also { it[index] = changed }
@@ -199,15 +210,17 @@ private fun NotificationTriggerEditor(
     onChange: (LessonNotificationTrigger) -> Unit
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Switch(
-            checked = trigger.enabled,
-            onCheckedChange = { onChange(trigger.copy(enabled = it)) }
+        Text(
+            text = title,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium
         )
-        Text(title, modifier = Modifier.weight(1f))
         OutlinedTextField(
             value = trigger.minutesBefore.toString(),
             onValueChange = { raw ->
@@ -215,10 +228,16 @@ private fun NotificationTriggerEditor(
                     onChange(trigger.copy(minutesBefore = minutes.coerceIn(0, 360)))
                 }
             },
-            modifier = Modifier.weight(0.75f),
-            label = { Text("分前") },
+            modifier = Modifier.width(88.dp),
+            suffix = { Text(stringResource(R.string.unit_minutes_short)) },
             singleLine = true,
-            enabled = trigger.enabled
+            enabled = trigger.enabled,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+        )
+        Switch(
+            checked = trigger.enabled,
+            onCheckedChange = { onChange(trigger.copy(enabled = it)) },
+            modifier = Modifier.scale(0.82f)
         )
     }
 }
@@ -230,10 +249,31 @@ private fun TemplateField(
     multiline: Boolean = false,
     onChange: (String) -> Unit
 ) {
+    var draft by rememberSaveable(value) { mutableStateOf(value) }
+    var wasFocused by remember { mutableStateOf(false) }
+    val latestDraft by rememberUpdatedState(draft)
+    val latestValue by rememberUpdatedState(value)
+    val latestOnChange by rememberUpdatedState(onChange)
+
+    fun commit() {
+        if (draft != value) onChange(draft)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            if (latestDraft != latestValue) latestOnChange(latestDraft)
+        }
+    }
+
     OutlinedTextField(
-        value = value,
-        onValueChange = onChange,
-        modifier = Modifier.fillMaxWidth(),
+        value = draft,
+        onValueChange = { draft = it },
+        modifier = Modifier
+            .fillMaxWidth()
+            .onFocusChanged { focusState ->
+                if (wasFocused && !focusState.isFocused) commit()
+                wasFocused = focusState.isFocused
+            },
         label = { Text(label) },
         singleLine = !multiline,
         minLines = if (multiline) 3 else 1

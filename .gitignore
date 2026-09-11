@@ -46,3 +46,4 @@ APK/
 *.jks
 *.keystore
 release-signing/
+/gradle/gradle-daemon-jvm.properties

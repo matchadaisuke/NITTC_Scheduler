@@ -35,88 +35,8 @@ class PlanReminderWorker(
         val planId = inputData.getLong(KEY_PLAN_ID, 0L)
         if (planId <= 0L) return Result.success()
 
-        val plan = AppDatabase.getInstance(applicationContext)
-            .schedulerDao()
-            .getPlanById(planId)
-            ?: return Result.success()
-
-        if (!plan.reminderEnabled || plan.isCompleted || plan.reminderDate == null) {
-            return Result.success()
-        }
-
-        createNotificationChannel()
-
-        val openAppIntent = Intent(applicationContext, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        val openAppPendingIntent = PendingIntent.getActivity(
-            applicationContext,
-            plan.id.toInt(),
-            openAppIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle(applicationContext.getString(R.string.plan_reminder_notification_title))
-            .setContentText(
-                applicationContext.getString(
-                    R.string.plan_reminder_notification_body,
-                    plan.title
-                )
-            )
-            .setStyle(
-                NotificationCompat.BigTextStyle().bigText(
-                    buildReminderBody(plan)
-                )
-            )
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(NotificationCompat.CATEGORY_REMINDER)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setAutoCancel(true)
-            .setContentIntent(openAppPendingIntent)
-            .build()
-
-        val posted = NotificationManagerCompat.from(applicationContext).notifyIfAllowed(
-            applicationContext,
-            planReminderNotificationId(plan.id),
-            notification
-        )
-        if (posted) CloudFileSyncManager.requestSync(applicationContext)
-
+        deliverNotification(applicationContext, planId, source = "worker")
         return Result.success()
-    }
-
-    private fun buildReminderBody(plan: PlanEntity): String {
-        val dueText = applicationContext.getString(
-            R.string.task_reminder_due_summary,
-            plan.dueDate.toString(),
-            String.format("%02d:%02d", plan.dueHour, plan.dueMinute)
-        )
-        return buildString {
-            append(applicationContext.getString(R.string.plan_reminder_notification_body, plan.title))
-            if (plan.subject.isNotBlank()) {
-                append("\n")
-                append(applicationContext.getString(R.string.task_reminder_subject_summary, plan.subject))
-            }
-            append("\n")
-            append(dueText)
-        }
-    }
-
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val manager = applicationContext.getSystemService(NotificationManager::class.java)
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            applicationContext.getString(R.string.plan_reminder_channel_name),
-            NotificationManager.IMPORTANCE_HIGH
-        ).apply {
-            description = applicationContext.getString(R.string.plan_reminder_channel_desc)
-            lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
-            enableVibration(true)
-        }
-        manager.createNotificationChannel(channel)
     }
 
     companion object {
@@ -184,6 +104,84 @@ class PlanReminderWorker(
                 .build()
             WorkManager.getInstance(context.applicationContext)
                 .enqueueUniqueWork(uniqueWorkName(planId), ExistingWorkPolicy.REPLACE, request)
+        }
+
+        suspend fun deliverAlarmNotification(context: Context, planId: Long): Boolean =
+            deliverNotification(context.applicationContext, planId, source = "alarm_receiver")
+
+        private suspend fun deliverNotification(
+            context: Context,
+            planId: Long,
+            source: String
+        ): Boolean {
+            val plan = AppDatabase.getInstance(context).schedulerDao().getPlanById(planId)
+                ?: return false.also {
+                    ReminderDebug.log("plan delivery skipped source=$source planId=$planId reason=not_found")
+                }
+            if (!plan.reminderEnabled || plan.isCompleted || plan.reminderDate == null) {
+                ReminderDebug.log("plan delivery skipped source=$source planId=$planId reason=ineligible")
+                return false
+            }
+
+            createNotificationChannel(context)
+            val notificationId = planReminderNotificationId(plan.id)
+            val openAppPendingIntent = PendingIntent.getActivity(
+                context,
+                plan.id.toInt(),
+                Intent(context, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle(context.getString(R.string.plan_reminder_notification_title))
+                .setContentText(context.getString(R.string.plan_reminder_notification_body, plan.title))
+                .setStyle(NotificationCompat.BigTextStyle().bigText(buildReminderBody(context, plan)))
+                .setPriority(NotificationCompat.PRIORITY_MAX)
+                .setCategory(NotificationCompat.CATEGORY_REMINDER)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setOnlyAlertOnce(true)
+                .setAutoCancel(true)
+                .setContentIntent(openAppPendingIntent)
+                .build()
+            val posted = NotificationManagerCompat.from(context)
+                .notifyIfAllowed(context, notificationId, notification)
+            if (posted) CloudFileSyncManager.requestSync(context)
+            ReminderDebug.log("plan delivery finished source=$source planId=$planId posted=$posted")
+            return posted
+        }
+
+        private fun buildReminderBody(context: Context, plan: PlanEntity): String {
+            val dueText = context.getString(
+                R.string.task_reminder_due_summary,
+                plan.dueDate.toString(),
+                String.format("%02d:%02d", plan.dueHour, plan.dueMinute)
+            )
+            return buildString {
+                append(context.getString(R.string.plan_reminder_notification_body, plan.title))
+                if (plan.subject.isNotBlank()) {
+                    append("\n")
+                    append(context.getString(R.string.task_reminder_subject_summary, plan.subject))
+                }
+                append("\n")
+                append(dueText)
+            }
+        }
+
+        private fun createNotificationChannel(context: Context) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+            context.getSystemService(NotificationManager::class.java).createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ID,
+                    context.getString(R.string.plan_reminder_channel_name),
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = context.getString(R.string.plan_reminder_channel_desc)
+                    lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+                    enableVibration(true)
+                }
+            )
         }
 
         private fun alarmPendingIntent(context: Context, planId: Long): PendingIntent {
